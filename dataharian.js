@@ -74,7 +74,6 @@ onAuthStateChanged(auth, async user => {
     if (listEl) listEl.innerHTML = `<div class="loading-card">Belum login</div>`;
     return;
   }
-  console.log("🔐 USER LOGIN:", user.uid);
   const adminSnap = await getDoc(doc(db, "users", user.uid));
   if (!adminSnap.exists()) {
     console.log("⚠️ admin tidak ditemukan");
@@ -82,10 +81,8 @@ onAuthStateChanged(auth, async user => {
   }
   const adminData = adminSnap.data();
   const idCabang = adminData.idCabang;
-  console.log("🏢 ID CABANG:", idCabang);
   // ── INI LOAD KANTOR CABANG ──
   const kantorCabang = await loadKantorCabang(idCabang);
-  console.log("📦 KANTOR CABANG READY IN RAM:", kantorCabang);
   renderPengeluaranVariable(kantorCabang);
   renderFixCost(kantorCabang);
   renderMarginalCost();
@@ -109,7 +106,6 @@ async function loadKantorCabang(idCabang, forceReload = false) {
     return cacheKantorCabang;
   }
   try {
-    console.log("🔄 FETCH KANTOR CABANG FIRESTORE:", idCabang);
     const snap = await getDoc(doc(db, "kantorCabang", idCabang));
     if (!snap.exists()) {
       console.log("⚠️ KANTOR CABANG TIDAK ADA:", idCabang);
@@ -118,7 +114,6 @@ async function loadKantorCabang(idCabang, forceReload = false) {
     const data = snap.data();
     cacheKantorCabang = data;
     cacheKantorCabangUpdatedAt = now;
-    console.log("✅ KANTOR CABANG LOADED:", data);
     return data;
   } catch (err) {
     console.error("❌ gagal load kantorCabang:", err);
@@ -329,7 +324,6 @@ function renderPengeluaranVariable(kantorCabang) {
 
   // Insert sebelum elemen pertama yang ada di container
   container.insertBefore(fragment, container.firstChild);
-  console.log("✅ Variable pengeluaran dirender:", list);
 }
 // Hitung otomatis variable cost
 document.addEventListener("input", e => {
@@ -546,26 +540,20 @@ async function loadPengeluaranProduksiDraft() {
     // 1. Coba IndexedDB dulu
     const localData = await getPengeluaranIndexedDB(today);
     if (localData?.pengeluaranProduksi) {
-      console.log("💾 draft dari IndexedDB:", localData);
       data = localData.pengeluaranProduksi;
     } else {
-      // 2. Fallback ke Firestore
-      console.log("📭 IndexedDB kosong, load dari Firestore...");
       try {
         const user = auth.currentUser;
         if (!user) return;
         const snap = await getDoc(doc(db, "users", user.uid, "laporanAdmin", today));
         if (snap.exists() && snap.data()?.pengeluaranProduksi) {
           data = snap.data().pengeluaranProduksi;
-          console.log("☁️ draft dari Firestore:", data);
-          // Simpan ke IndexedDB supaya next load tidak perlu ke Firestore
           await savePengeluaranIndexedDB({
             tanggal: today,
             pengeluaranProduksi: data,
             updatedAt: Date.now()
           });
         } else {
-          console.log("📭 Firestore juga kosong");
           return;
         }
       } catch (err) {
@@ -574,7 +562,6 @@ async function loadPengeluaranProduksiDraft() {
       }
     }
     
-    console.log("📦 draft ditemukan:", data);
     document.querySelectorAll(".variable-row").forEach(row => {
       const label = row.querySelector(".expense-label")?.innerText?.trim();
       const item = data.variableCost?.[label];
@@ -614,7 +601,6 @@ async function loadPengeluaranProduksiDraft() {
       row.querySelector(".lainnya-harga").value = item.harga || 0;
       lainnyaWrap ?.classList.add("show");
     });
-    console.log("Draft pengeluaran loaded");
   } catch (err) {
     console.error("❌ load draft:", err);
   }
@@ -1031,7 +1017,6 @@ async function loadKurir() {
       return;
     }
     const roles = ["kurir", "sales", "hunter"];
-    console.log("🔍 Load Kurir Role Filter:", roles);
     const snap = await getDocs(
       query(
         collection(db, "users"),
@@ -1040,7 +1025,6 @@ async function loadKurir() {
         where("status", "==", true)
       )
     );
-    console.log("📦 Total hasil Firestore:", snap.size);
     if (snap.empty) {
       listEl.innerHTML = `<div class="loading-card">Belum ada kurir</div>`;
       return;
@@ -1058,11 +1042,6 @@ async function loadKurir() {
       const role = escapeHtml(data.role || "kurir");
       const foto = data.foto || "";
       const inisial = (data.nama || "?").trim().charAt(0).toUpperCase();
-      console.log("👤 Kurir Loaded:", {
-        id: docSnap.id,
-        nama: data.nama,
-        role: data.role
-      });
       cacheKurirMap[docSnap.id] = {
         nama: data.nama || "Tanpa Nama",
         role: data.role || "kurir"
@@ -1137,7 +1116,6 @@ async function loadKurir() {
     });
 
     listEl.innerHTML = html;
-    console.log("✅ Render kurir selesai");
     // ── Long Press Catatan Kurir ──
     listEl.querySelectorAll(".kurir-card").forEach(card => {
       let pressTimer = null;
@@ -1428,19 +1406,44 @@ async function savePopupData(btn) {
     // Update bawaBarang (khusus order)
     if (type === "order") {
       try {
-        const marketingRef = doc(db, "users", uidMarketing);
+        const marketingRef  = doc(db, "users", uidMarketing);
         const marketingSnap = await getDoc(marketingRef);
         if (marketingSnap.exists()) {
-          const oldBawaBarang = marketingSnap.data().bawaBarang || [];
-          const newBawaBarang = oldBawaBarang.map(item => {
-            const key = Object.keys(item)[0];
-            if (!key) return item;
-            return { [key]: { ...item[key], bawa: Number(mapData[key] || 0) } };
-          });
-          await setDoc(marketingRef, { bawaBarang: newBawaBarang, bawaBarangUpdate: serverTimestamp() }, { merge: true });
+          const marketingData = marketingSnap.data();
+          const oldBawaBarang = marketingData.bawaBarang || [];
+          const varian        = marketingData.varian     || [];
+
+          let newBawaBarang;
+
+          if (oldBawaBarang.length > 0) {
+            newBawaBarang = oldBawaBarang.map(item => {
+              const key = Object.keys(item)[0];
+              if (!key) return item;
+              // Hanya simpan bawa, buang field yang sudah ada di varian
+              const { hargaKonsumen, hargaProduksi, isAktif, ...rest } = item[key] || {};
+              return { [key]: { ...rest, bawa: Number(mapData[key] ?? 0) } };
+            });
+          } else if (varian.length > 0) {
+            // Fallback dari varian — hanya ambil key, simpan bawa saja
+            newBawaBarang = varian.map(item => {
+              const key = Object.keys(item)[0];
+              if (!key) return item;
+              return { [key]: { bawa: Number(mapData[key] ?? 0) } };
+            });
+          } else {
+            console.warn("bawaBarang dan varian kosong, skip update");
+            return;
+          }
+
+          await setDoc(marketingRef, {
+            bawaBarang      : newBawaBarang,
+            bawaBarangUpdate: serverTimestamp()
+          }, { merge: true });
+
+          console.log("✅ bawaBarang updated:", newBawaBarang);
         }
       } catch (err) {
-        console.error("Gagal update bawaBarang", err);
+        console.error("❌ Gagal update bawaBarang:", err);
       }
     }
     sukses = true;
@@ -1851,6 +1854,12 @@ function closePopupDataHarian() {
   document.getElementById("popupDataHarianOverlay").classList.remove("show");
   document.body.classList.remove("popup-open");
 }
+document.getElementById("popupDataHarianClose")
+  ?.addEventListener("touchend", e => {
+    e.preventDefault();
+    e.stopPropagation();
+    closePopupDataHarianWithCleanup();
+  });
 
 function enablePopupDrag(popupSelector, handleSelector) {
   const popup = document.querySelector(popupSelector);
@@ -1938,38 +1947,42 @@ function closePopupDataHarianWithCleanup() { cleanupDrag(".popup-dataharian-box"
   });
 })();
 (function setupSwipeDataHarian() {
-  const box = document.querySelector(".popup-dataharian-box");
-  if (!box) return;
+  const box     = document.querySelector(".popup-dataharian-box");
+  const header  = document.querySelector(".popup-dataharian-header");
+  const content = document.getElementById("popupDataHarianContent");
+  if (!box || !header) return;
+
   let startY = 0, currentY = 0, dragging = false;
 
-  box.addEventListener("touchstart", e => {
+  // Swipe hanya dari header — bukan dari content/tombol
+  header.addEventListener("touchstart", e => {
     if (window.innerWidth > 768) return;
-    startY   = e.touches[0].clientY;
-    currentY = startY;
+    startY = currentY = e.touches[0].clientY;
     dragging = true;
     box.style.transition = "none";
   }, { passive: true });
 
-  box.addEventListener("touchmove", e => {
+  header.addEventListener("touchmove", e => {
     if (!dragging || window.innerWidth > 768) return;
     currentY = e.touches[0].clientY;
     const dy = currentY - startY;
     if (dy < 0) return;
     e.preventDefault();
-    box.style.transform = `translateY(${dy}px)`;
+    box.style.transform = `translateY(${dy * 0.9}px)`;
   }, { passive: false });
 
-  box.addEventListener("touchend", () => {
+  header.addEventListener("touchend", () => {
     if (!dragging || window.innerWidth > 768) return;
     dragging = false;
-    box.style.transition = "";
     const dy = currentY - startY;
-    if (dy > 120) {
+    box.style.transition = "transform .28s ease";
+    if (dy > 80) {
       box.style.transform = "translateY(100%)";
       setTimeout(() => {
         closePopupDataHarianWithCleanup();
         box.style.transform = "";
-      }, 300);
+        box.style.transition = "";
+      }, 280);
     } else {
       box.style.transform = "";
     }
@@ -2190,22 +2203,14 @@ async function loadLaporanAdminTanggal(tanggalDoc, forceReload = false) {
     }
   }
 
-  // 1. RAM cache
-  if (cacheLaporanAdmin[tanggalDoc] !== undefined) {
-    console.log("⚡ RAM CACHE HIT", tanggalDoc);
-    return cacheLaporanAdmin[tanggalDoc];
-  }
+  if (cacheLaporanAdmin[tanggalDoc] !== undefined) return cacheLaporanAdmin[tanggalDoc];
 
-  // 2. IndexedDB
   const indexedData = await getLaporanIndexedDB(tanggalDoc);
   if (indexedData !== null) {
-    console.log("💾 IndexedDB HIT", tanggalDoc);
     cacheLaporanAdmin[tanggalDoc] = indexedData;
     return indexedData;
   }
 
-  // 3. Tidak ada cache
-  console.log("📭 Tidak ada cache", tanggalDoc);
   cacheLaporanAdmin[tanggalDoc] = undefined;
   return undefined;
 }
@@ -2431,7 +2436,7 @@ document.addEventListener("click", async e => {
   }
 
   // Popup close
-  if (e.target.id === "popupDataHarianClose") { closePopupDataHarianWithCleanup(); return; }
+  if (e.target.closest("#popupDataHarianClose")) { closePopupDataHarianWithCleanup(); return; }
   if (e.target.id === "popupClose" || e.target.id === "popupOverlay") { closePopupWithCleanup(); return; }
   if (e.target.id === "periodPopupOverlay") { closePeriodPopup(); return; }
   if (e.target.id === "dataPeriodBtn") { openPeriodPopup(); return; }
@@ -2450,6 +2455,8 @@ document.addEventListener("click", async e => {
   if (reloadDhBtn) {
     reloadDhBtn.disabled = true;
     reloadDhBtn.innerText = "⏳ Memuat...";
+    console.log("🔄 Reload tanggal:", reloadDhBtn.dataset.tanggal);
+    console.log("🔄 Reload uid:", reloadDhBtn.dataset.uid);
     await renderPopupDataHarian(
       reloadDhBtn.dataset.uid,
       reloadDhBtn.dataset.nama,
