@@ -64,10 +64,6 @@
         <div class="page-title">DSM</div>
         <div class="page-sub" id="cabangAdmin">—</div>
       </div>
-      <button class="btn btn-primary" id="btnTambah">
-        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
-        Tambah
-      </button>
     </div>
 
     <!-- TOOLBAR -->
@@ -77,6 +73,37 @@
         <input type="text" id="searchInput" placeholder="Cari nama customer...">
       </div>
       <div class="toolbar-right">
+
+        <!-- Filter Hari -->
+        <select class="filter-select" id="filterHari">
+          <option value="Senin">Senin</option>
+          <option value="Selasa">Selasa</option>
+          <option value="Rabu">Rabu</option>
+          <option value="Kamis">Kamis</option>
+          <option value="Jumat">Jumat</option>
+          <option value="Sabtu">Sabtu</option>
+          <option value="Minggu">Minggu</option>
+        </select>
+
+        <!-- Filter Bulan -->
+        <select class="filter-select" id="filterBulan">
+          <option value="0">Januari</option>
+          <option value="1">Februari</option>
+          <option value="2">Maret</option>
+          <option value="3">April</option>
+          <option value="4">Mei</option>
+          <option value="5">Juni</option>
+          <option value="6">Juli</option>
+          <option value="7">Agustus</option>
+          <option value="8">September</option>
+          <option value="9">Oktober</option>
+          <option value="10">November</option>
+          <option value="11">Desember</option>
+        </select>
+
+        <!-- Filter Tahun -->
+        <select class="filter-select" id="filterTahun"></select>
+
         <button class="btn" id="btnExport">
           <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           Export
@@ -85,6 +112,8 @@
           <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
           Reload
         </button>
+
+        <!-- Pilih Kurir -->
         <div class="kurir-select-wrap" id="kurirSelectWrap">
           <button class="btn btn-kurir" id="btnPilihKurir">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
@@ -93,6 +122,7 @@
           </button>
           <div class="kurir-dropdown" id="kurirDropdown"></div>
         </div>
+
       </div>
     </div>
 
@@ -114,12 +144,12 @@
         </table>
       </div>
 
-      <!-- PAGINATION -->
+      <!-- PAGINATION MINGGU -->
       <div class="pagination" id="pagination">
         <button class="page-btn" id="btnPrev" disabled>
           <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
         </button>
-        <div class="page-info" id="pageInfo">0 data</div>
+        <div class="page-info" id="pageInfo">—</div>
         <button class="page-btn" id="btnNext" disabled>
           <svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
         </button>
