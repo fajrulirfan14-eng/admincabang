@@ -347,9 +347,9 @@ async function reloadDataHarian(pemilik, tanggal) {
 
   snap.forEach(docSnap => {
     const d = docSnap.data();
-    // gabungkan semua doc dataHarian per customer
-    const customerId = d.customerId || docSnap.id;
-    result[customerId] = { ...d, _docId: docSnap.id };
+    // key pakai idCustomer — field yang menyimpan uid customer
+    const customerId = d.idCustomer || "";
+    if (customerId) result[customerId] = { ...d, _docId: docSnap.id };
   });
 
   await saveDataHarian(pemilik, tanggal, result);
