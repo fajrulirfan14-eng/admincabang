@@ -59,7 +59,7 @@ onAuthStateChanged(auth, async user => {
 
     // Show page
     hide("skeletonLoader");
-    show("damPage");
+    show("dsmPage");
 
     startClock();
     await loadData();
@@ -84,7 +84,7 @@ async function loadData() {
     allData = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     applyFilter();
   } catch (err) {
-    console.error("Gagal load DAM:", err);
+    console.error("Gagal load DSM:", err);
     showToast("Gagal memuat data", "error");
     renderEmpty();
   }
@@ -115,11 +115,11 @@ async function simpanData() {
     };
 
     if (editDocId) {
-      await setDoc(doc(db, "dam", editDocId), payload, { merge: true });
+      await setDoc(doc(db, "dsm", editDocId), payload, { merge: true });
       showToast("Data diperbarui", "success");
     } else {
       payload.createdAt = serverTimestamp();
-      await addDoc(collection(db, "dam"), payload);
+      await addDoc(collection(db, "dsm"), payload);
       showToast("Data ditambahkan", "success");
     }
 
@@ -140,7 +140,7 @@ async function hapusData() {
   btn.disabled    = true;
   btn.textContent = "Menghapus...";
   try {
-    await deleteDoc(doc(db, "dam", deleteDocId));
+    await deleteDoc(doc(db, "dsm", deleteDocId));
     showToast("Data dihapus", "success");
     closePopup("confirmOverlay");
     await loadData();
@@ -172,7 +172,7 @@ function applyFilter() {
 }
 
 function renderTable() {
-  const tbody = document.getElementById("damTableBody");
+  const tbody = document.getElementById("dsmTableBody");
   const total = filteredData.length;
 
   if (!total) { renderEmpty(); updatePagination(0, 0); return; }
@@ -207,7 +207,7 @@ function renderTable() {
 }
 
 function renderEmpty() {
-  document.getElementById("damTableBody").innerHTML = `
+  document.getElementById("dsmTableBody").innerHTML = `
     <tr>
       <td colspan="8" class="table-empty">
         <div class="empty-state">
@@ -219,7 +219,7 @@ function renderEmpty() {
 }
 
 function showTableLoading() {
-  document.getElementById("damTableBody").innerHTML = `
+  document.getElementById("dsmTableBody").innerHTML = `
     <tr class="loading-row">
       <td colspan="8">
         <div class="loading-spinner"></div><br>Memuat data...
@@ -292,7 +292,7 @@ function initEvents() {
   document.getElementById("confirmOverlay")?.addEventListener("click", e => { if (e.target === e.currentTarget) closePopup("confirmOverlay"); });
 
   // Edit & hapus via event delegation di table
-  document.getElementById("damTableBody")?.addEventListener("click", e => {
+  document.getElementById("dsmTableBody")?.addEventListener("click", e => {
     const editBtn  = e.target.closest(".aksi-btn.edit");
     const hapusBtn = e.target.closest(".aksi-btn.hapus");
     if (editBtn)  openPopupEdit(editBtn.dataset.id);
@@ -389,8 +389,8 @@ function exportExcel() {
   }));
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "DAM");
-  XLSX.writeFile(wb, `DAM_${new Date().toISOString().slice(0,10)}.xlsx`);
+  XLSX.utils.book_append_sheet(wb, ws, "DSM");
+XLSX.writeFile(wb, `DSM_${new Date().toISOString().slice(0,10)}.xlsx`);
   showToast("Export berhasil", "success");
 }
 
