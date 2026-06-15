@@ -146,7 +146,7 @@ thead th.grp-closing{background:#F0FFF0;color:#4A8A4A}
 
 /* TBODY */
 tbody td{
-  padding:12px 14px;
+  padding:3px 3px;
   border-bottom:1px solid var(--border);
   border-right:1px solid var(--border);
   font-size:13px;
@@ -375,7 +375,7 @@ tbody tr:hover .cell-closing   {background:rgba(74,138,74,.10)}
   #filterBulan{min-width:0}
   #filterTahun{min-width:0}
   .table-card{border-radius:12px}
-  tbody td.td-nama{min-width:120px}
+  tbody td.td-nama{min-width:100px}
   .cell-value{min-width:32px;font-size:12px}
   .kurir-dropdown{right:auto;left:0;min-width:180px}
   .popup-overlay{align-items:flex-end;justify-content:center;padding:0;background:rgba(0,0,0,.35)}
