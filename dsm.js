@@ -148,7 +148,7 @@ async function loadCustomerByKurir(kurirId) {
             all.onsuccess = () => {
               // simpan semua customer kurir, filter hari dilakukan di applyFilter
             customerList = all.result.filter(c =>
-              c.pemilik === kurirId && c.status === true
+              c.pemilik === kurirId
             );
             console.log("Customer ditemukan:", customerList.length, "untuk kurir:", kurirId);
               resolve(customerList);
@@ -305,7 +305,35 @@ async function getDataHarian(pemilik, tanggal) {
     });
   } catch (e) { return null; }
 }
+async function reloadDataHarianCustomer(pemilik, customerId, tanggal) {
+  const q = query(
+    collectionGroup(db, "dataHarian"),
+    where("idCabang",   "==", idCabang),
+    where("pemilik",    "==", pemilik),
+    where("tanggal",    "==", tanggal),
+    where("customerId", "==", customerId)
+  );
 
+  const snap = await getDocs(q);
+
+  if (snap.empty) {
+    console.log("Tidak ada dataHarian untuk customer:", customerId);
+    return;
+  }
+
+  // ambil cache existing dulu supaya tidak timpa customer lain
+  const existing = await getDataHarian(pemilik, tanggal);
+  const dataMap  = existing?.data || {};
+
+  // update hanya customer ini
+  snap.forEach(docSnap => {
+    const d = docSnap.data();
+    dataMap[customerId] = { ...d, _docId: docSnap.id };
+  });
+
+  await saveDataHarian(pemilik, tanggal, dataMap);
+  console.log(`✅ dataHarian customer ${customerId} diperbarui: ${tanggal}`);
+}
 async function reloadDataHarian(pemilik, tanggal) {
   const q = query(
     collectionGroup(db, "dataHarian"),
@@ -415,7 +443,7 @@ function renderThead() {
 
   const row1 = `
     <tr>
-      <th rowspan="2">#</th>
+      <th rowspan="2">No.</th>
       <th rowspan="2" style="text-align:left;min-width:140px">Nama Customer</th>
       ${groupHeaders}
       <th rowspan="2">Aksi</th>
@@ -628,59 +656,81 @@ function renderTable() {
   const total   = filteredData.length;
   const colSpan = 2 + GROUPS.length * (varianList.length || 1) + 1;
 
-  if (!total) {
-    renderEmpty(colSpan);
-    return;
-  }
+  if (!total) { renderEmpty(colSpan); return; }
 
-  tbody.innerHTML = filteredData.map((d, i) => {
-    // cari nama customer dari customerList berdasar customerId atau nama
-    const customer = customerList.find(c =>
-      c.id === d.customerId || c.namaCustomer === d.nama
-    );
+  // hitung sum
+  const sums = {};
+  GROUPS.forEach(g => {
+    sums[g.key] = {};
+    (varianList.length ? varianList : ["-"]).forEach(v => {
+      sums[g.key][v] = filteredData.reduce((acc, d) =>
+        acc + (Number(d[g.key]?.[v]) || 0), 0
+      );
+    });
+  });
+
+  const rows = filteredData.map((d, i) => {
+    const customer     = customerList.find(c => c.id === d.customerId || c.namaCustomer === d.nama);
     const namaCustomer = customer?.namaCustomer || d.nama || "-";
+
+    // hitung varian yang beda kemarin vs konsinyasi untuk baris ini saja
+    const varianBedaBaris = new Set(
+      (varianList.length ? varianList : ["-"]).filter(v => {
+        const nilaiKemarin    = Number(d.kemarin?.[v])    || 0;
+        const nilaiKonsinyasi = Number(d.konsinyasi?.[v]) || 0;
+        return nilaiKemarin !== nilaiKonsinyasi;
+      })
+    );
 
     const cells = GROUPS.map(g =>
       (varianList.length ? varianList : ["-"]).map(v => {
-        const val_ = d[g.key]?.[v] ?? 0;
-        return `<td>
-          <input
-            class="cell-input"
-            type="number"
-            min="0"
-            value="${val_ === 0 ? "" : val_}"
-            data-kurir-id="${d.kurirId}"
-            data-customer-id="${d.customerId}"
-            data-tanggal="${d.tanggal}"
-            data-group="${g.key}"
-            data-varian="${v}"
-          >
-        </td>`;
+        const val_      = d[g.key]?.[v] ?? 0;
+        const isBeda    = (g.key === "kemarin" || g.key === "konsinyasi") && varianBedaBaris.has(v);
+        const highlight = isBeda ? " cell-beda" : "";
+        return `<td class="cell-${g.key}${highlight}"><div class="cell-value">${val_ === 0 ? "" : val_}</div></td>`;
       }).join("")
     ).join("");
 
+    const isInaktif = customer?.status === false;
     return `
-      <tr>
+      <tr class="${isInaktif ? "row-inaktif" : ""}">
         <td>${i + 1}</td>
         <td class="td-nama">
           <div class="nama-customer">${esc(namaCustomer)}</div>
-          ${customer?.alamat
-            ? `<div class="nama-customer-sub">${esc(customer.alamat)}</div>`
-            : ""}
+          ${customer?.alamat ? `<div class="nama-customer-sub">${esc(customer.alamat)}</div>` : ""}
+          ${isInaktif ? `<div class="nama-customer-badge">Nonaktif</div>` : ""}
         </td>
         ${cells}
         <td>
-          <div class="aksi-wrap">
-            <button class="aksi-btn edit" title="Edit" data-id="${d.id}">
-              <svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-            </button>
-            <button class="aksi-btn hapus" title="Hapus" data-id="${d.id}">
-              <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
-            </button>
-          </div>
+          <button
+            class="aksi-btn reload-row"
+            title="Reload data customer ini"
+            data-customer-id="${d.customerId}"
+            data-kurir-id="${d.kurirId}"
+            data-tanggal="${d.tanggal}"
+            data-nama="${esc(namaCustomer)}"
+          >
+            <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+          </button>
         </td>
       </tr>`;
   }).join("");
+
+  const sumCells = GROUPS.map(g =>
+    (varianList.length ? varianList : ["-"]).map(v => {
+      const s = sums[g.key][v];
+      return `<td class="sum-cell cell-${g.key}">${s === 0 ? "" : s}</td>`;
+    }).join("")
+  ).join("");
+
+  const sumRow = `
+    <tr class="sum-row">
+      <td colspan="2" class="sum-label">Total</td>
+      ${sumCells}
+      <td></td>
+    </tr>`;
+
+  tbody.innerHTML = rows + sumRow;
 }
 
 function renderEmpty(colSpan = 20) {
@@ -733,7 +783,56 @@ function closePopup(id) { document.getElementById(id)?.classList.remove("show");
 
 /* ── EVENTS ────────────────────────────────── */
 let _cellTimer = null;
+/* ── DRAG SCROLL HORIZONTAL TABLE ──────────── */
+function setupTableDragScroll() {
+  const wrap = document.querySelector(".table-wrap");
+  if (!wrap) return;
 
+  let isDown   = false;
+  let startX   = 0;
+  let scrollL  = 0;
+  let moved    = false;
+
+  wrap.addEventListener("mousedown", e => {
+    // hanya left click, bukan di button
+    if (e.button !== 0 || e.target.closest("button")) return;
+    isDown  = true;
+    moved   = false;
+    startX  = e.pageX - wrap.offsetLeft;
+    scrollL = wrap.scrollLeft;
+    wrap.style.cursor = "grabbing";
+    wrap.style.userSelect = "none";
+  });
+
+  document.addEventListener("mousemove", e => {
+    if (!isDown) return;
+    const x    = e.pageX - wrap.offsetLeft;
+    const walk = x - startX;
+    if (Math.abs(walk) > 5) moved = true;
+    wrap.scrollLeft = scrollL - walk;
+  });
+
+  document.addEventListener("mouseup", () => {
+    if (!isDown) return;
+    isDown = false;
+    wrap.style.cursor = "";
+    wrap.style.userSelect = "";
+  });
+
+  // touch drag juga
+  let touchStartX  = 0;
+  let touchScrollL = 0;
+
+  wrap.addEventListener("touchstart", e => {
+    touchStartX  = e.touches[0].pageX;
+    touchScrollL = wrap.scrollLeft;
+  }, { passive: true });
+
+  wrap.addEventListener("touchmove", e => {
+    const dx = touchStartX - e.touches[0].pageX;
+    wrap.scrollLeft = touchScrollL + dx;
+  }, { passive: true });
+}
 function initEvents() {
   // Init filter dropdown
   initFilterTahun();
@@ -817,31 +916,32 @@ function initEvents() {
     if (e.target === e.currentTarget) closePopup("confirmOverlay");
   });
 
-  // Delegasi: aksi edit/hapus + input cell
-  document.getElementById("dsmTableBody")?.addEventListener("click", e => {
-    const editBtn  = e.target.closest(".aksi-btn.edit");
-    const hapusBtn = e.target.closest(".aksi-btn.hapus");
-    if (editBtn)  openPopupEdit(editBtn.dataset.id);
-    if (hapusBtn) openPopupHapus(hapusBtn.dataset.id);
+  // Delegasi: reload per baris
+  document.getElementById("dsmTableBody")?.addEventListener("click", async e => {
+    const reloadBtn = e.target.closest(".reload-row");
+    if (!reloadBtn) return;
+
+    const customerId = reloadBtn.dataset.customerId;
+    const kurirId    = reloadBtn.dataset.kurirId;
+    const tanggal    = reloadBtn.dataset.tanggal;
+    const nama       = reloadBtn.dataset.nama;
+
+    reloadBtn.disabled = true;
+    reloadBtn.classList.add("spinning");
+
+    try {
+      await reloadDataHarianCustomer(kurirId, customerId, tanggal);
+      await applyFilter();
+      showToast(`✓ ${nama} diperbarui`, "success");
+    } catch (err) {
+      console.error(err);
+      showToast("Gagal reload", "error");
+    } finally {
+      reloadBtn.disabled = false;
+      reloadBtn.classList.remove("spinning");
+    }
   });
 
-  // Input cell — simpan ke IndexedDB dengan debounce 800ms
-  document.getElementById("dsmTableBody")?.addEventListener("input", e => {
-    const inp = e.target.closest(".cell-input");
-    if (!inp) return;
-    clearTimeout(_cellTimer);
-    _cellTimer = setTimeout(() => {
-      simpanCell(
-        inp.dataset.kurirId,
-        inp.dataset.customerId,
-        inp.dataset.tanggal,
-        inp.dataset.group,
-        inp.dataset.varian,
-        inp.value
-      );
-    }, 800);
-  });
-  
   // Kurir dropdown toggle
   document.getElementById("btnPilihKurir")?.addEventListener("click", e => {
     e.stopPropagation();
@@ -877,6 +977,7 @@ function initEvents() {
   setupSwipe("popupBox",   "popupOverlay");
   setupSwipe("confirmBox", "confirmOverlay");
   setupDrag("popupBox",    "popupHandle");
+  setupTableDragScroll();
 }
 
 /* ── SWIPE TO CLOSE (mobile) ───────────────── */

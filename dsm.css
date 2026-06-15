@@ -163,22 +163,20 @@ tbody tr{transition:background .1s}
 tbody tr:hover td{background:var(--bg)}
 tbody tr:hover td.td-nama{background:var(--bg)}
 
-/* INPUT CELL */
-.cell-input{
-  width:60px;
-  height:32px;
-  border:1px solid var(--border);
-  border-radius:8px;
-  background:var(--card);
-  font-family:inherit;
+/* CELL VALUE READ ONLY */
+.cell-value{
+  min-width:40px;
   font-size:13px;
+  font-weight:500;
   color:var(--text);
   text-align:center;
-  outline:none;
-  transition:.15s;
-  padding:0 4px;
 }
-.cell-input:focus{border-color:var(--primary);background:#fff;box-shadow:0 0 0 3px rgba(201,166,123,.15)}
+
+/* SPINNING RELOAD BTN */
+@keyframes spinIcon{to{transform:rotate(360deg)}}
+.aksi-btn.spinning svg{
+  animation:spinIcon .6s linear infinite;
+}
 
 /* EMPTY STATE */
 .table-empty{text-align:center;padding:48px 16px !important;color:var(--text-muted)}
@@ -186,9 +184,91 @@ tbody tr:hover td.td-nama{background:var(--bg)}
 .empty-state svg{width:40px;height:40px;stroke:var(--border);fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
 .empty-state span{font-size:13px;color:var(--text-muted)}
 
+/* SUM ROW */
+.sum-row{position:sticky;bottom:0;z-index:3}
+.sum-row td{
+  background:var(--primary-light);
+  border-top:2px solid var(--primary);
+  border-bottom:none;
+  font-weight:700;
+  font-size:13px;
+  color:var(--primary-dark);
+}
+.sum-label{
+  text-align:center;
+  font-size:12px;
+  font-weight:800;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+  color:var(--primary-dark);
+  white-space:nowrap;
+}
+.sum-cell{
+  text-align:center;
+  font-size:13px;
+  font-weight:700;
+  color:var(--primary-dark);
+}
+
 /* NAMA CUSTOMER */
 .nama-customer{font-size:13px;font-weight:600;color:var(--text)}
 .nama-customer-sub{font-size:11px;color:var(--text-muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px}
+.nama-customer-badge{display:inline-block;margin-top:3px;font-size:10px;font-weight:700;color:#999;background:#f0f0f0;border-radius:4px;padding:1px 6px;letter-spacing:.03em}
+
+/* ROW INAKTIF */
+.row-inaktif td{opacity:.45}
+.row-inaktif td.td-nama{opacity:.55}
+.row-inaktif .nama-customer{color:var(--text-muted)}
+
+/* HIGHLIGHT CELL PER GROUP */
+.cell-kemarin   {background:rgba(74,114,196,.04)}
+.cell-return    {background:rgba(196,90,74,.04)}
+.cell-expired   {background:rgba(196,122,42,.04)}
+.cell-konsinyasi{background:rgba(74,155,106,.04)}
+.cell-cash      {background:rgba(106,74,196,.04)}
+.cell-lainnya   {background:rgba(74,155,196,.04)}
+.cell-bayar     {background:rgba(196,74,138,.04)}
+.cell-closing   {background:rgba(74,138,74,.04)}
+
+/* HIGHLIGHT KOLOM BEDA KEMARIN vs KONSINYASI */
+.cell-beda{
+  position:relative;
+}
+.cell-beda::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  border-left:2px solid currentColor;
+  border-right:2px solid currentColor;
+  opacity:.25;
+  pointer-events:none;
+}
+.cell-kemarin.cell-beda{
+  background:rgba(74,114,196,.12) !important;
+  color:#4A72C4;
+  font-weight:700;
+}
+.cell-konsinyasi.cell-beda{
+  background:rgba(74,155,106,.12) !important;
+  color:#4A9B6A;
+  font-weight:700;
+}
+.cell-kemarin.cell-beda .cell-value{color:#4A72C4;font-weight:700}
+.cell-konsinyasi.cell-beda .cell-value{color:#4A9B6A;font-weight:700}
+
+/* baris sum juga highlight */
+.sum-row .cell-kemarin.cell-beda{background:rgba(74,114,196,.18) !important}
+.sum-row .cell-konsinyasi.cell-beda{background:rgba(74,155,106,.18) !important}
+
+/* hover lebih terang per group */
+tbody tr:hover .cell-kemarin   {background:rgba(74,114,196,.10)}
+tbody tr:hover .cell-return    {background:rgba(196,90,74,.10)}
+tbody tr:hover .cell-expired   {background:rgba(196,122,42,.10)}
+tbody tr:hover .cell-konsinyasi{background:rgba(74,155,106,.10)}
+tbody tr:hover .cell-cash      {background:rgba(106,74,196,.10)}
+tbody tr:hover .cell-lainnya   {background:rgba(74,155,196,.10)}
+tbody tr:hover .cell-bayar     {background:rgba(196,74,138,.10)}
+tbody tr:hover .cell-closing   {background:rgba(74,138,74,.10)}
 
 /* AKSI */
 .aksi-wrap{display:flex;align-items:center;justify-content:center;gap:6px}
@@ -296,7 +376,7 @@ tbody tr:hover td.td-nama{background:var(--bg)}
   #filterTahun{min-width:0}
   .table-card{border-radius:12px}
   tbody td.td-nama{min-width:120px}
-  .cell-input{width:50px;font-size:12px}
+  .cell-value{min-width:32px;font-size:12px}
   .kurir-dropdown{right:auto;left:0;min-width:180px}
   .popup-overlay{align-items:flex-end;justify-content:center;padding:0;background:rgba(0,0,0,.35)}
   .popup-box{width:100%;max-width:100%;border-radius:22px 22px 0 0;max-height:90vh;transform:translateY(100%)}
