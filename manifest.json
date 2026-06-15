@@ -1,13 +1,11 @@
 {
-  "name": "Teh Tarik Nusantara Administrasi",
-  "short_name": "TTN Administrasi",
-  "description": "Aplikasi administrasi distribusi Teh Tarik Nusantara",
-  "start_url": "/index.html",
-  "scope": "/",
-  "display": "standalone",
-  "orientation": "portrait",
-  "theme_color": "#C9A67B",
-  "background_color": "#efe5d7",
+  "name": "TTN Marketing",
+  "short_name": "TehTarik Marketing",
+  "description": "Aplikasi manajemen pendataan duvisi marketing.",
+  "start_url": "index.html",
+  "display": "fullscreen",
+  "background_color": "#f8e9d2",
+  "theme_color": "#b3874f",
   "icons": [
     {
       "src": "icon_32.png",
@@ -22,16 +20,12 @@
     {
       "src": "icon_192.png",
       "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any maskable"
+      "type": "image/png"
     },
     {
       "src": "icon_512.png",
       "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
+      "type": "image/png"
     }
-  ],
-  "categories": ["business", "productivity"],
-  "lang": "id"
+  ]
 }

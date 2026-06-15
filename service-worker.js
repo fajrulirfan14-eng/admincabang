@@ -1,4 +1,4 @@
-const APP_VERSION = "4";
+const APP_VERSION  = "5";
 const CACHE_STATIC = `static-v${APP_VERSION}`;
 
 const STATIC_ASSETS = [
@@ -58,32 +58,28 @@ const STATIC_ASSETS = [
 self.addEventListener("install", event => {
   self.skipWaiting();
   event.waitUntil(
-    caches.open(CACHE_STATIC).then(cache => {
-      return cache.addAll(STATIC_ASSETS);
-    })
+    caches.open(CACHE_STATIC).then(cache => cache.addAll(STATIC_ASSETS))
   );
 });
 
 // Activate — hapus cache lama
 self.addEventListener("activate", event => {
   event.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(
-        keys
-          .filter(key => key !== CACHE_STATIC)
-          .map(key => caches.delete(key))
-      )
-    ).then(() => self.clients.claim())
+    caches.keys()
+      .then(keys => Promise.all(
+        keys.filter(k => k !== CACHE_STATIC).map(k => caches.delete(k))
+      ))
+      .then(() => self.clients.claim())
   );
 });
 
-// Fetch — strategi berbeda per tipe request
+// Fetch
 self.addEventListener("fetch", event => {
   if (event.request.method !== "GET") return;
 
   const url = new URL(event.request.url);
 
-  // Firestore, Firebase Auth, FCM — selalu network, jangan cache
+  // Firebase/Google API — selalu network
   if (
     url.hostname.includes("firestore.googleapis.com") ||
     url.hostname.includes("firebase") ||
@@ -96,7 +92,10 @@ self.addEventListener("fetch", event => {
   }
 
   // Google Maps — network first, fallback cache
-  if (url.hostname.includes("maps.googleapis.com") || url.hostname.includes("maps.gstatic.com")) {
+  if (
+    url.hostname.includes("maps.googleapis.com") ||
+    url.hostname.includes("maps.gstatic.com")
+  ) {
     event.respondWith(
       fetch(event.request)
         .then(res => {
@@ -109,11 +108,10 @@ self.addEventListener("fetch", event => {
     return;
   }
 
-  // Aset statis (JS/CSS/HTML/gambar) — cache first, fallback network
+  // Aset statis — cache first, fallback network
   event.respondWith(
     caches.match(event.request).then(cached => {
       if (cached) return cached;
-      // Tidak ada di cache — ambil dari network & simpan
       return fetch(event.request).then(res => {
         if (!res || res.status !== 200) return res;
         const clone = res.clone();
