@@ -155,6 +155,56 @@
       </div>
     </div>
 
+    <!-- CARD ANALISA TRIKOTOMI -->
+    <div class="analisa-card" id="analisaCard">
+      <div class="analisa-header">
+        <div>
+          <div class="analisa-title">Analisa Trikotomi</div>
+          <div class="analisa-subtitle" id="analisaSubtitle">—</div>
+        </div>
+        <div class="analisa-periode-wrap" id="analisaPeriodeWrap">
+          <button class="btn btn-kurir" id="btnAnalisaPeriode">
+            <svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+            <span id="analisaPeriodeLabel">T-1 (Periode Sebelumnya)</span>
+            <svg class="chevron" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+          <div class="analisa-periode-dropdown" id="analisaPeriodeDropdown">
+            <div class="analisa-periode-option active" data-periode="1">
+              <div class="analisa-periode-nama">T-1 · Periode Sebelumnya</div>
+              <div class="analisa-periode-desc">1 minggu sebelum periode aktif</div>
+            </div>
+            <div class="analisa-periode-option" data-periode="2">
+              <div class="analisa-periode-nama">T-2 · Dua Periode Sebelumnya</div>
+              <div class="analisa-periode-desc">2 minggu sebelum periode aktif</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="analisa-summary">
+        <div class="analisa-sum-card green">
+          <div class="analisa-sum-value" id="analisaGreen">0</div>
+          <div class="analisa-sum-label">Produktif</div>
+        </div>
+        <div class="analisa-sum-card yellow">
+          <div class="analisa-sum-value" id="analisaYellow">0</div>
+          <div class="analisa-sum-label">Stabil</div>
+        </div>
+        <div class="analisa-sum-card red">
+          <div class="analisa-sum-value" id="analisaRed">0</div>
+          <div class="analisa-sum-label">Non Produktif</div>
+        </div>
+        <div class="analisa-sum-card grey">
+          <div class="analisa-sum-value" id="analisaGrey">0</div>
+          <div class="analisa-sum-label">Belum Ada Data</div>
+        </div>
+      </div>
+
+      <div class="analisa-groups" id="analisaGroups">
+        <div class="analisa-empty">Pilih kurir dan tanggal dulu</div>
+      </div>
+    </div>
+
   </main>
 </div>
 
@@ -205,6 +255,7 @@
 <nav></nav>
 <script src="navbar.js"></script>
 <script type="module" src="dsm.js"></script>
-
+<div id="devConsoleMount"></div>
+<script src="devconsole.js"></script>
 </body>
 </html>

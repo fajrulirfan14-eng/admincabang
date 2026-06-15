@@ -18,6 +18,7 @@ let selectedKurirId = null;
 let kurirList       = [];
 let customerList    = [];
 let selectedHari    = "Senin";
+let selectedPeriode = 1;
 let selectedBulan   = new Date().getMonth();
 let selectedTahun   = new Date().getFullYear();
 let mingguKe        = 1;
@@ -649,6 +650,7 @@ async function applyFilter() {
     });
 
   renderTable();
+  renderAnalisa();
 }
 
 function renderTable() {
@@ -879,18 +881,17 @@ function initEvents() {
     if (mingguKe < totalMinggu) { mingguKe++; saveDsmPageState(); await applyFilter(); }
   });
   document.getElementById("btnReload")?.addEventListener("click", async () => {
-    if (!selectedKurirId) {
-      showToast("Pilih kurir dulu", "error");
-      return;
-    }
-    if (!selectedTanggal) {
-      showToast("Pilih tanggal dulu", "error");
-      return;
-    }
+    if (!selectedKurirId) { showToast("Pilih kurir dulu", "error"); return; }
+    if (!selectedTanggal) { showToast("Pilih tanggal dulu", "error"); return; }
+
     const btn = document.getElementById("btnReload");
     btn.disabled = true;
     showTableLoading();
+
     try {
+      // query kantorCabang dan simpan ke IndexedDB
+      await syncKantorCabang();
+      // query dataHarian
       await reloadDataHarian(selectedKurirId, formatTanggal(selectedTanggal));
       await applyFilter();
       showToast("Data berhasil dimuat", "success");
@@ -899,6 +900,32 @@ function initEvents() {
       showToast("Gagal reload data", "error");
     } finally {
       btn.disabled = false;
+    }
+  });
+  // toggle dropdown periode analisa
+  document.getElementById("btnAnalisaPeriode")?.addEventListener("click", e => {
+    e.stopPropagation();
+    document.getElementById("analisaPeriodeWrap")?.classList.toggle("open");
+  });
+
+  // pilih periode
+  document.getElementById("analisaPeriodeDropdown")?.addEventListener("click", async e => {
+    const opt = e.target.closest(".analisa-periode-option");
+    if (!opt) return;
+    selectedPeriode = Number(opt.dataset.periode);
+    const label = opt.querySelector(".analisa-periode-nama").textContent;
+    setText("analisaPeriodeLabel", label);
+    document.querySelectorAll(".analisa-periode-option").forEach(o =>
+      o.classList.toggle("active", o.dataset.periode === String(selectedPeriode))
+    );
+    document.getElementById("analisaPeriodeWrap")?.classList.remove("open");
+    await renderAnalisa();
+  });
+
+  // tutup dropdown kalau klik luar
+  document.addEventListener("click", e => {
+    if (!e.target.closest("#analisaPeriodeWrap")) {
+      document.getElementById("analisaPeriodeWrap")?.classList.remove("open");
     }
   });
   document.getElementById("btnExport")?.addEventListener("click", exportExcel);
@@ -1097,6 +1124,276 @@ function showToast(msg, type = "") {
   requestAnimationFrame(() => t.classList.add("show"));
   clearTimeout(_toastTimer);
   _toastTimer = setTimeout(() => t.classList.remove("show"), 2800);
+}
+/* ── LOAD TRIKOTOMI FROM INDEXEDDB ─────────── */
+async function syncKantorCabang() {
+  if (!idCabang) return;
+  try {
+    const snap = await getDoc(doc(db, "kantorCabang", idCabang));
+    if (!snap.exists()) return;
+
+    const data = snap.data();
+
+    // simpan ke IndexedDB laporanDistribusiDB store kantorCabang
+    const req = indexedDB.open("laporanDistribusiDB");
+    await new Promise((resolve, reject) => {
+      req.onsuccess = () => {
+        try {
+          const idb = req.result;
+          if (!idb.objectStoreNames.contains("kantorCabang")) {
+            resolve(); return;
+          }
+          const tx    = idb.transaction("kantorCabang", "readwrite");
+          const store = tx.objectStore("kantorCabang");
+          store.put({ ...data, id: idCabang });
+          tx.oncomplete = () => resolve();
+          tx.onerror    = () => reject(tx.error);
+        } catch (e) { resolve(); }
+      };
+      req.onerror = () => reject(req.error);
+    });
+
+    console.log("✅ kantorCabang synced");
+  } catch (e) {
+    console.error("Gagal sync kantorCabang:", e);
+  }
+}
+async function loadTrikotomi() {
+  return new Promise(resolve => {
+    try {
+      const req = indexedDB.open("laporanDistribusiDB");
+      req.onsuccess = () => {
+        try {
+          const idb = req.result;
+          if (!idb.objectStoreNames.contains("kantorCabang")) {
+            resolve(TRI_DEFAULT); return;
+          }
+          const tx  = idb.transaction("kantorCabang", "readonly");
+          const st  = tx.objectStore("kantorCabang");
+          const all = st.getAll();
+          all.onsuccess = () => {
+            const kantor    = all.result?.[0] || {};
+            const trikotomi = kantor?.trikotomi || null;
+            resolve(trikotomi ? { ...TRI_DEFAULT, ...trikotomi } : TRI_DEFAULT);
+          };
+          all.onerror = () => resolve(TRI_DEFAULT);
+        } catch (e) { resolve(TRI_DEFAULT); }
+      };
+      req.onerror = () => resolve(TRI_DEFAULT);
+    } catch (e) { resolve(TRI_DEFAULT); }
+  });
+}
+/* ── ANALISA TRIKOTOMI ─────────────────────── */
+const TRI_DEFAULT = {
+  produktif:    { return: { min:0, max:1  }, expired: { min:0, max:0    } },
+  stabil:       { return: { min:2, max:2  }, expired: { min:0, max:1    } },
+  nonProduktif: { return: { min:3, max:9999 }, expired: { min:2, max:9999 } }
+};
+
+function triInRange(val, min, max) { return val >= min && val <= max; }
+
+function triKlasifikasi(returnTotal, expiredTotal, tri = TRI_DEFAULT) {
+  function getK(val, field) {
+    if (triInRange(val, tri.produktif[field].min,    tri.produktif[field].max))    return 1;
+    if (triInRange(val, tri.stabil[field].min,       tri.stabil[field].max))       return 2;
+    if (triInRange(val, tri.nonProduktif[field].min, tri.nonProduktif[field].max)) return 3;
+    return 0;
+  }
+  const worst = Math.max(getK(returnTotal, "return"), getK(expiredTotal, "expired"));
+  return worst === 3 ? "red" : worst === 2 ? "yellow" : worst === 1 ? "green" : "grey";
+}
+
+function triTanggalReferensi() {
+  const tanggalList = hitungMingguDalamBulan(selectedHari, selectedBulan, selectedTahun);
+
+  function getTanggalMundur(mundur) {
+    const targetMinggu = mingguKe - mundur;
+    if (targetMinggu >= 1) return tanggalList[targetMinggu - 1] || null;
+
+    const kurang    = Math.abs(targetMinggu) + 1;
+    const bulanPrev = selectedBulan === 0 ? 11 : selectedBulan - 1;
+    const tahunPrev = selectedBulan === 0 ? selectedTahun - 1 : selectedTahun;
+    const listPrev  = hitungMingguDalamBulan(selectedHari, bulanPrev, tahunPrev);
+    const idxPrev   = listPrev.length - kurang;
+    return idxPrev >= 0 ? listPrev[idxPrev] : null;
+  }
+
+  if (selectedPeriode === 1) {
+    // T-1: hanya 1 minggu sebelumnya
+    const t = getTanggalMundur(1);
+    return t ? [t] : [];
+  }
+
+  // T-2: kumpulkan T-1 dan T-2, rata-rata nanti di renderAnalisa
+  const t1 = getTanggalMundur(1);
+  const t2 = getTanggalMundur(2);
+  return [t1, t2].filter(Boolean);
+}
+
+async function renderAnalisa() {
+  const groupEl    = document.getElementById("analisaGroups");
+  const subtitleEl = document.getElementById("analisaSubtitle");
+  if (!groupEl) return;
+
+  // ambil trikotomi dari IndexedDB
+  const tri = await loadTrikotomi();
+
+  if (!selectedKurirId || !selectedTanggal) {
+    groupEl.innerHTML = `<div class="analisa-empty">Pilih kurir dan tanggal dulu</div>`;
+    return;
+  }
+
+  groupEl.innerHTML = `<div class="analisa-empty">Memuat analisa...</div>`;
+
+  // tanggal referensi (minggu sebelumnya)
+  const refDates = triTanggalReferensi();
+
+  if (!refDates.length) {
+    groupEl.innerHTML = `<div class="analisa-empty">Tidak ada data minggu sebelumnya</div>`;
+    setText("analisaGreen", "0");
+    setText("analisaYellow", "0");
+    setText("analisaRed", "0");
+    setText("analisaGrey", String(customerList.filter(c => c.hari === selectedHari).length));
+    return;
+  }
+
+  // ambil dataHarian untuk semua tanggal referensi
+  // T-1: ambil 1 tanggal saja
+  // T-2: ambil 2 tanggal, rata-rata return & expired per customer
+
+  // kumpulkan semua data per customer per tanggal
+  const rawMap = {}; // { cid: [ {return, expired, closing, tanggal}, ... ] }
+
+  for (const d of refDates) {
+    const tStr    = formatTanggal(d);
+    const cache   = await getDataHarian(selectedKurirId, tStr);
+    const dataMap = cache?.data || {};
+
+    Object.entries(dataMap).forEach(([cid, doc]) => {
+      if (!rawMap[cid]) rawMap[cid] = [];
+      rawMap[cid].push({ ...doc, _tanggal: tStr });
+    });
+  }
+
+  // hitung rata-rata per customer kalau T-2, ambil langsung kalau T-1
+  const latestMap = {};
+  Object.entries(rawMap).forEach(([cid, docs]) => {
+    if (selectedPeriode === 1 || docs.length === 1) {
+      // T-1 atau hanya ada 1 data → pakai langsung
+      latestMap[cid] = docs[0];
+    } else {
+      // T-2 → rata-rata return & expired dari semua tanggal yang ada
+      const avgReturn  = {};
+      const avgExpired = {};
+      const avgClosing = {};
+
+      // kumpulkan semua varian
+      const allVarian = new Set();
+      docs.forEach(doc => {
+        Object.keys(doc.return  || {}).forEach(v => allVarian.add(v));
+        Object.keys(doc.expired || {}).forEach(v => allVarian.add(v));
+        Object.keys(doc.closing || {}).forEach(v => allVarian.add(v));
+      });
+
+      allVarian.forEach(v => {
+        const retVals  = docs.map(d => Number(d.return?.[v]  || 0));
+        const expVals  = docs.map(d => Number(d.expired?.[v] || 0));
+        const closVals = docs.map(d => Number(d.closing?.[v] || 0));
+
+        avgReturn[v]  = Math.round(retVals.reduce((a,b)  => a+b, 0) / docs.length);
+        avgExpired[v] = Math.round(expVals.reduce((a,b)  => a+b, 0) / docs.length);
+        avgClosing[v] = Math.round(closVals.reduce((a,b) => a+b, 0) / docs.length);
+      });
+
+      latestMap[cid] = {
+        ...docs[docs.length - 1], // ambil metadata dari yang terbaru
+        return:  avgReturn,
+        expired: avgExpired,
+        closing: avgClosing,
+        _tanggal: `rata-rata ${docs.map(d => d._tanggal).join(" & ")}`,
+        _isAvg: true
+      };
+    }
+  });
+
+  // customer aktif hari ini
+  const activeCustomers = customerList.filter(c => c.hari === selectedHari);
+
+  // klasifikasi
+  const result = activeCustomers.map(c => {
+    const cid     = c.id || c.uid;
+    const dsm     = latestMap[cid] || null;
+    const retTotal = dsm
+      ? Object.values(dsm.return  || {}).reduce((a, v) => a + (Number(v) || 0), 0)
+      : 0;
+    const expTotal = dsm
+      ? Object.values(dsm.expired || {}).reduce((a, v) => a + (Number(v) || 0), 0)
+      : 0;
+    const closTotal = dsm
+      ? Object.values(dsm.closing || {}).reduce((a, v) => a + (Number(v) || 0), 0)
+      : 0;
+    const tanggalRef = dsm?._tanggal || dsm?.tanggal || null;
+
+    return {
+      nama:     c.namaCustomer || "-",
+      status:   dsm ? triKlasifikasi(retTotal, expTotal, tri) : "grey",
+      tanggal:  tanggalRef,
+      retTotal, expTotal, closTotal
+    };
+  });
+
+  const green  = result.filter(x => x.status === "green");
+  const yellow = result.filter(x => x.status === "yellow");
+  const red    = result.filter(x => x.status === "red");
+  const grey   = result.filter(x => x.status === "grey");
+
+  setText("analisaGreen",  String(green.length));
+  setText("analisaYellow", String(yellow.length));
+  setText("analisaRed",    String(red.length));
+  setText("analisaGrey",   String(grey.length));
+
+  const bulanNama = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agt","Sep","Okt","Nov","Des"];
+  const refLabel  = refDates.map(d =>
+    `${selectedHari} ${d.getDate()} ${bulanNama[d.getMonth()]} ${d.getFullYear()}`
+  ).join(", ");
+  setText("analisaSubtitle", `Referensi: ${refLabel}`);
+
+  function buildGroup(title, color, data) {
+    if (!data.length) return "";
+    const items = data.map(c => `
+      <div class="analisa-customer-item">
+        <div>
+          <div class="analisa-customer-name">${esc(c.nama)}</div>
+          <div class="analisa-customer-detail">
+            Return: ${c.retTotal} · Expired: ${c.expTotal} · Closing: ${c.closTotal}
+            ${c.tanggal ? ` · Data: ${c.tanggal}` : ""}
+          </div>
+        </div>
+        <div class="analisa-customer-score">${c.retTotal + c.expTotal}</div>
+      </div>`).join("");
+
+    return `
+      <div class="analisa-group ${color}">
+        <div class="analisa-group-head" onclick="this.parentElement.classList.toggle('open')">
+          <span>${title} — ${data.length} customer</span>
+          <span class="analisa-group-count">▶</span>
+        </div>
+        <div class="analisa-group-body">${items}</div>
+      </div>`;
+  }
+
+  groupEl.innerHTML =
+    buildGroup("🟢 Produktif",       "green",  green)  ||
+    buildGroup("🟡 Stabil",          "yellow", yellow) ||
+    buildGroup("🔴 Non Produktif",   "red",    red)    ||
+    buildGroup("⚪ Belum Ada Data",  "grey",   grey)   ||
+    `<div class="analisa-empty">Tidak ada customer</div>`;
+
+  groupEl.innerHTML =
+    buildGroup("🟢 Produktif",      "green",  green)  +
+    buildGroup("🟡 Stabil",         "yellow", yellow) +
+    buildGroup("🔴 Non Produktif",  "red",    red)    +
+    buildGroup("⚪ Belum Ada Data", "grey",   grey);
 }
 
 /* ── HELPERS ───────────────────────────────── */
