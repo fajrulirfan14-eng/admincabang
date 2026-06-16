@@ -606,8 +606,10 @@ async function applyFilter() {
           let val = 0;
 
           if (g.key === "kemarin") {
-            // dataKemarin[varian].qty
-            val = harianDoc?.dataKemarin?.[v]?.qty ?? 0;
+            // prioritas: dataHarian → fallback ke field dataKemarin di customer
+            const fromHarian   = harianDoc?.dataKemarin?.[v]?.qty;
+            const fromCustomer = c.dataKemarin?.[v]?.qty;
+            val = fromHarian ?? fromCustomer ?? 0;
 
           } else if (g.key === "return") {
             val = harianDoc?.return?.[v] ?? 0;
