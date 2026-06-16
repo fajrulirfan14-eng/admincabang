@@ -357,6 +357,33 @@ async function reloadDataHarian(pemilik, tanggal) {
   console.log(`📦 dataHarian disimpan: ${pemilik}_${tanggal}, ${snap.size} dokumen`);
   return result;
 }
+/* ── LAPORAN ADMIN ─────────────────────────── */
+let laporanAdminCache = null; // cache per tanggal
+async function loadLaporanMarketing(tanggal, kurirId) {
+  try {
+    if (!currentUser?.uid || !kurirId) return {};
+
+    const q = query(
+      collectionGroup(db, "laporanMarketing"),
+      where("createdBy",   "==", currentUser.uid),
+      where("tanggal",     "==", tanggal),
+      where("idMarketing", "==", kurirId)
+    );
+
+    const snap = await getDocs(q);
+    if (snap.empty) return {};
+
+    const data = snap.docs[0].data();
+    return data;
+  } catch (e) {
+    console.error("Gagal load laporanMarketing:", e);
+    return {};
+  }
+}
+
+function getRekapOrder(laporanMarketing) {
+  return laporanMarketing?.order || {};
+}
 /* ── KALKULASI MINGGU ──────────────────────── */
 function hitungMingguDalamBulan(hari, bulan, tahun) {
   // kembalikan array tanggal dari hari tertentu dalam bulan/tahun
@@ -424,6 +451,18 @@ function syncFilterUI() {
 }
 
 /* ── RENDER THEAD DINAMIS ──────────────────── */
+const REKAP_GROUPS = [
+  { key: "order",   label: "Order",    varian: true  },
+  { key: "fee",     label: "Fee",      varian: true  },
+  { key: "disable", label: "Disable",  varian: true  },
+  { key: "output",  label: "Output",   varian: true  },
+  { key: "saldo",   label: "Saldo",    varian: true  },
+  { key: "pay",     label: "Pay",      varian: true  },
+  { key: "customer", label: "Customer", varian: false,
+    sub: ["Tutup","Pending","Putus","Expired"] },
+  { key: "omset",    label: "Omset",    varian: false,
+    sub: ["Value"], colspan: 4 },
+];
 const GROUPS = [
   { key: "kemarin",    label: "Data Kemarin",  cls: "grp-kemarin"   },
   { key: "return",     label: "Return",        cls: "grp-return"    },
@@ -444,7 +483,7 @@ function renderThead() {
 
   const row1 = `
     <tr>
-      <th rowspan="2">No.</th>
+      <th rowspan="2">#</th>
       <th rowspan="2" style="text-align:left;min-width:140px">Nama Customer</th>
       ${groupHeaders}
       <th rowspan="2">Aksi</th>
@@ -579,6 +618,9 @@ async function applyFilter() {
 
   const tanggalStr = formatTanggal(selectedTanggal);
 
+  // load laporanMarketing untuk tanggal + kurir ini
+  const laporanAdmin = await loadLaporanMarketing(tanggalStr, selectedKurirId);
+
   // ambil data DSM tersimpan untuk kurir + tanggal ini
   const dsmData = await getDsmData(selectedKurirId, tanggalStr);
 
@@ -652,6 +694,7 @@ async function applyFilter() {
     });
 
   renderTable();
+  renderRekap(laporanAdmin, dataHarianMap);
   renderAnalisa();
 }
 
@@ -734,7 +777,75 @@ function renderTable() {
       <td></td>
     </tr>`;
 
+  // baris rekap kosong placeholder (nanti diisi data)
+  const rekapCells = REKAP_GROUPS.map(g =>
+    (varianList.length ? varianList : ["-"]).map(v =>
+      `<td class="rekap-cell rekap-${g.key}"><div class="cell-value">—</div></td>`
+    ).join("")
+  ).join("");
+
+  const rekapRow = `
+    <tr class="rekap-row">
+        ${rekapCells}
+        <td></td>
+      </tr>`;
+
   tbody.innerHTML = rows + sumRow;
+
+  // render rekap ke tfoot
+  const tfoot = document.getElementById("dsmTfoot");
+  if (tfoot) {
+    const vLen = varianList.length || 1;
+
+    const rekapHeaders = REKAP_GROUPS.map(r => {
+      const span = r.varian
+        ? vLen
+        : (r.colspan || r.sub?.length || 1);
+      return `<th colspan="${span}" class="grp-rekap grp-rekap-${r.key}">${r.label}</th>`;
+    }).join("");
+
+    const rekapSubCols = REKAP_GROUPS.map(r => {
+      if (r.varian) {
+        return (varianList.length ? varianList : ["-"])
+          .map(v => `<th class="rekap-sub">${v}</th>`).join("");
+      }
+      if (r.colspan) {
+        // merge jadi 1 cell colspan
+        return `<th class="rekap-sub" colspan="${r.colspan}">${r.sub?.[0] || ""}</th>`;
+      }
+      return (r.sub || [])
+        .map(s => `<th class="rekap-sub">${s}</th>`).join("");
+    }).join("");
+
+    const rekapCells = REKAP_GROUPS.map(g => {
+      if (g.varian) {
+        return (varianList.length ? varianList : ["-"]).map(v =>
+          `<td class="rekap-cell rekap-${g.key}"><div class="cell-value"></div></td>`
+        ).join("");
+      }
+      if (g.colspan) {
+        return `<td class="rekap-cell rekap-${g.key}" colspan="${g.colspan}">
+          <div class="cell-value rekap-omset">Rp 0</div>
+        </td>`;
+      }
+      return (g.sub || []).map(s =>
+        `<td class="rekap-cell rekap-${g.key}"><div class="cell-value"></div></td>`
+      ).join("");
+    }).join("");
+
+    tfoot.innerHTML = `
+      <tr class="thead-rekap-row">
+        <th rowspan="3" colspan="2" class="rekap-label-th">Rekapitulasi</th>
+        ${rekapHeaders}
+        <th rowspan="3"></th>
+      </tr>
+      <tr class="thead-rekap-sub">
+        ${rekapSubCols}
+      </tr>
+      <tr class="rekap-row">
+        ${rekapCells}
+      </tr>`;
+  }
 }
 
 function renderEmpty(colSpan = 20) {
@@ -1231,7 +1342,168 @@ function triTanggalReferensi() {
   const t2 = getTanggalMundur(2);
   return [t1, t2].filter(Boolean);
 }
+/* ── RENDER REKAP ──────────────────────────── */
+function renderRekap(laporanAdmin = {}, dataHarianMap = {}) {
+  const tfoot = document.getElementById("dsmTfoot");
+  if (!tfoot) return;
 
+  // ambil order per varian dari laporanMarketing
+  const orderData = getRekapOrder(laporanAdmin);
+
+  // update cell order di rekap-row
+  const rekapCells = tfoot.querySelectorAll(".rekap-row .rekap-order .cell-value");
+
+  // rebuild rekap row dengan nilai order
+  const rekapRow = tfoot.querySelector(".rekap-row");
+  if (!rekapRow) return;
+
+  const vLen = varianList.length || 1;
+
+  const rekapCellsHtml = REKAP_GROUPS.map(g => {
+    if (g.key === "order") {
+      return (varianList.length ? varianList : ["-"]).map(v => {
+        const val_ = orderData?.[v] ?? 0;
+        return `<td class="rekap-cell rekap-order">
+          <div class="cell-value">${val_ === 0 ? "" : val_}</div>
+        </td>`;
+      }).join("");
+    }
+
+    if (g.key === "fee") {
+      return (varianList.length ? varianList : ["-"]).map(v => {
+        const total = filteredData.reduce((acc, d) => {
+          const cId      = d.customerId;
+          const harianDoc = dataHarianMap[cId] || {};
+          return acc + (Number(harianDoc?.fee?.[v]) || 0);
+        }, 0);
+        return `<td class="rekap-cell rekap-fee">
+          <div class="cell-value">${total === 0 ? "" : total}</div>
+        </td>`;
+      }).join("");
+    }
+
+    if (g.key === "disable") {
+      return (varianList.length ? varianList : ["-"]).map(v => {
+        const total = filteredData.reduce((acc, d) => {
+          const cId       = d.customerId;
+          const harianDoc = dataHarianMap[cId] || {};
+          return acc + (Number(harianDoc?.disable?.[v]) || 0);
+        }, 0);
+        return `<td class="rekap-cell rekap-disable">
+          <div class="cell-value">${total === 0 ? "" : total}</div>
+        </td>`;
+      }).join("");
+    }
+
+    if (g.key === "output") {
+      return (varianList.length ? varianList : ["-"]).map(v => {
+        const total = filteredData.reduce((acc, d) => {
+          const cId       = d.customerId;
+          const harianDoc = dataHarianMap[cId] || {};
+          const closing   = Number(harianDoc?.closing?.[v])  || 0;
+          const fee       = Number(harianDoc?.fee?.[v])      || 0;
+          const disable   = Number(harianDoc?.disable?.[v])  || 0;
+          return acc + closing + fee + disable;
+        }, 0);
+        return `<td class="rekap-cell rekap-output">
+          <div class="cell-value">${total === 0 ? "" : total}</div>
+        </td>`;
+      }).join("");
+    }
+
+    if (g.key === "saldo") {
+      return (varianList.length ? varianList : ["-"]).map(v => {
+        const orderVal = Number(orderData?.[v]) || 0;
+        const output   = filteredData.reduce((acc, d) => {
+          const cId       = d.customerId;
+          const harianDoc = dataHarianMap[cId] || {};
+          const closing   = Number(harianDoc?.closing?.[v])  || 0;
+          const fee       = Number(harianDoc?.fee?.[v])      || 0;
+          const disable   = Number(harianDoc?.disable?.[v])  || 0;
+          return acc + closing + fee + disable;
+        }, 0);
+        const saldo = orderVal - output;
+        return `<td class="rekap-cell rekap-saldo">
+          <div class="cell-value">${saldo === 0 ? "" : saldo}</div>
+        </td>`;
+      }).join("");
+    }
+
+    if (g.key === "pay") {
+      return (varianList.length ? varianList : ["-"]).map(v => {
+        const total = filteredData.reduce((acc, d) => {
+          const cId       = d.customerId;
+          const harianDoc = dataHarianMap[cId] || {};
+          return acc + (Number(harianDoc?.pay?.[v]) || 0);
+        }, 0);
+        return `<td class="rekap-cell rekap-pay">
+          <div class="cell-value">${total === 0 ? "" : total}</div>
+        </td>`;
+      }).join("");
+    }
+
+    // kolom lain masih placeholder
+    if (g.varian) {
+      return (varianList.length ? varianList : ["-"]).map(() =>
+        `<td class="rekap-cell rekap-${g.key}"><div class="cell-value"></div></td>`
+      ).join("");
+    }
+    if (g.key === "customer") {
+      const statusList = ["Tutup", "Pending", "Putus", "Expired"];
+      return statusList.map(s => {
+        if (s === "Expired") {
+          const totalExpired = filteredData.reduce((acc, d) => {
+            const harianDoc = dataHarianMap[d.customerId] || {};
+            return acc + Object.values(harianDoc?.expired || {})
+              .reduce((a, v) => a + (Number(v) || 0), 0);
+          }, 0);
+
+          const totalPay = filteredData.reduce((acc, d) => {
+            const harianDoc = dataHarianMap[d.customerId] || {};
+            return acc + Object.values(harianDoc?.pay || {})
+              .reduce((a, v) => a + (Number(v) || 0), 0);
+          }, 0);
+
+          const persen = totalPay > 0
+            ? ((totalExpired / totalPay) * 100).toFixed(1)
+            : 0;
+
+          return `<td class="rekap-cell rekap-customer">
+            <div class="cell-value">${persen + "%"}</div>
+          </td>`;
+        }
+        const count = filteredData.reduce((acc, d) => {
+          const harianDoc = dataHarianMap[d.customerId] || {};
+          const status    = harianDoc?.keterangan?.status || "";
+          return acc + (status.toLowerCase() === s.toLowerCase() ? 1 : 0);
+        }, 0);
+        return `<td class="rekap-cell rekap-customer">
+          <div class="cell-value">${count === 0 ? "" : count}</div>
+        </td>`;
+      }).join("");
+    }
+
+    if (g.key === "omset") {
+      const totalOmset = filteredData.reduce((acc, d) => {
+        const harianDoc = dataHarianMap[d.customerId] || {};
+        return acc + (Number(harianDoc?.pembayaran?.bayarKonsumen) || 0);
+      }, 0);
+
+      const formatted = totalOmset.toLocaleString("id-ID", {
+        style: "currency", currency: "IDR", minimumFractionDigits: 0
+      });
+
+      return `<td class="rekap-cell rekap-omset" colspan="${g.colspan || 4}">
+        <div class="cell-value rekap-omset">${totalOmset === 0 ? "Rp 0" : formatted}</div>
+      </td>`;
+    }
+    return (g.sub || []).map(() =>
+      `<td class="rekap-cell rekap-${g.key}"><div class="cell-value"></div></td>`
+    ).join("");
+  }).join("");
+
+  rekapRow.innerHTML = `${rekapCellsHtml}<td></td>`;
+}
 async function renderAnalisa() {
   const groupEl    = document.getElementById("analisaGroups");
   const subtitleEl = document.getElementById("analisaSubtitle");
