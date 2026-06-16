@@ -203,33 +203,52 @@ tbody tr:hover td.td-nama{background:var(--bg)}
   vertical-align:middle;
 }
 .grp-rekap{text-align:center;font-weight:700}
-.grp-rekap-order  {background:rgba(74,114,196,.85)  !important;color:#fff !important}
-.grp-rekap-fee    {background:rgba(74,155,106,.85)  !important;color:#fff !important}
-.grp-rekap-disable{background:rgba(196,90,74,.85)   !important;color:#fff !important}
-.grp-rekap-output {background:rgba(106,74,196,.85)  !important;color:#fff !important}
-.grp-rekap-saldo  {background:rgba(196,122,42,.85)  !important;color:#fff !important}
-.grp-rekap-pay    {background:rgba(196,74,138,.85)  !important;color:#fff !important}
-.grp-rekap-customer{background:rgba(74,138,74,.85)  !important;color:#fff !important}
-.grp-rekap-omset  {background:rgba(168,132,90,.85)  !important;color:#fff !important}
+.grp-rekap-order   {background:#3B5FA0 !important;color:#fff !important}
+.grp-rekap-fee     {background:#2E7D52 !important;color:#fff !important}
+.grp-rekap-disable {background:#B84040 !important;color:#fff !important}
+.grp-rekap-output  {background:#5B3A9E !important;color:#fff !important}
+.grp-rekap-saldo   {background:#B06A1A !important;color:#fff !important}
+.grp-rekap-pay     {background:#A0307A !important;color:#fff !important}
+.grp-rekap-customer{background:#2E7060 !important;color:#fff !important}
+.grp-rekap-omset   {background:#7A5230 !important;color:#fff !important}
 
+/* sub header per group */
 .thead-rekap-sub th{
-  background:var(--primary-light);
   font-size:10px;
   font-weight:700;
-  color:var(--primary-dark);
   text-align:center;
-  border-bottom:2px solid var(--border);
+  border-bottom:2px solid rgba(255,255,255,.2);
+  color:rgba(255,255,255,.9);
 }
+/* warna sub header ikut group */
+.rekap-sub-order   {background:#4A6EB0 !important}
+.rekap-sub-fee     {background:#3A8E62 !important}
+.rekap-sub-disable {background:#C85050 !important}
+.rekap-sub-output  {background:#6B4AAE !important}
+.rekap-sub-saldo   {background:#C07A2A !important}
+.rekap-sub-pay     {background:#B04090 !important}
+.rekap-sub-customer{background:#3A8070 !important}
+.rekap-sub-omset   {background:#8A6240 !important}
+
 .rekap-sub{text-align:center}
 
+/* cell nilai per group */
 .rekap-row td{
-  background:var(--bg);
-  border-top:2px solid var(--primary);
   font-size:13px;
   font-weight:600;
   text-align:center;
   color:var(--text);
+  border-top:none;
 }
+.rekap-cell-order   {background:rgba(59,95,160,.07)  !important}
+.rekap-cell-fee     {background:rgba(46,125,82,.07)   !important}
+.rekap-cell-disable {background:rgba(184,64,64,.07)   !important}
+.rekap-cell-output  {background:rgba(91,58,158,.07)   !important}
+.rekap-cell-saldo   {background:rgba(176,106,26,.07)  !important}
+.rekap-cell-pay     {background:rgba(160,48,122,.07)  !important}
+.rekap-cell-customer{background:rgba(46,112,96,.07)   !important}
+.rekap-cell-omset   {background:rgba(122,82,48,.07)   !important}
+
 .rekap-label{
   text-align:center;
   font-size:11px;
@@ -241,11 +260,10 @@ tbody tr:hover td.td-nama{background:var(--bg)}
   white-space:nowrap;
   vertical-align:middle;
 }
-.rekap-cell{text-align:center}
 .rekap-omset{
   font-size:13px;
   font-weight:800;
-  color:var(--primary-dark);
+  color:#7A5230;
   white-space:nowrap;
 }
 

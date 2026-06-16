@@ -461,7 +461,7 @@ const REKAP_GROUPS = [
   { key: "customer", label: "Customer", varian: false,
     sub: ["Tutup","Pending","Putus","Expired"] },
   { key: "omset",    label: "Omset",    varian: false,
-    sub: ["Value"], colspan: 4 },
+    sub: [], colspan: 5, rowspan: 2 },
 ];
 const GROUPS = [
   { key: "kemarin",    label: "Data Kemarin",  cls: "grp-kemarin"   },
@@ -807,31 +807,52 @@ function renderTable() {
     const rekapSubCols = REKAP_GROUPS.map(r => {
       if (r.varian) {
         return (varianList.length ? varianList : ["-"])
-          .map(v => `<th class="rekap-sub">${v}</th>`).join("");
+          .map(v => `<th class="rekap-sub rekap-sub-${r.key}">${v}</th>`).join("");
       }
       if (r.colspan) {
-        // merge jadi 1 cell colspan
-        return `<th class="rekap-sub" colspan="${r.colspan}">${r.sub?.[0] || ""}</th>`;
+        // kalau rowspan=2 berarti merge ke baris nilai, tidak perlu sub header
+        if (r.rowspan) return "";
+        return `<th class="rekap-sub rekap-sub-${r.key}" colspan="${r.colspan}">${r.sub?.[0] || ""}</th>`;
       }
       return (r.sub || [])
-        .map(s => `<th class="rekap-sub">${s}</th>`).join("");
+        .map(s => `<th class="rekap-sub rekap-sub-${r.key}">${s}</th>`).join("");
     }).join("");
 
     const rekapCells = REKAP_GROUPS.map(g => {
       if (g.varian) {
         return (varianList.length ? varianList : ["-"]).map(v =>
-          `<td class="rekap-cell rekap-${g.key}"><div class="cell-value"></div></td>`
+          `<td class="rekap-cell rekap-cell-${g.key}"><div class="cell-value"></div></td>`
         ).join("");
       }
       if (g.colspan) {
-        return `<td class="rekap-cell rekap-${g.key}" colspan="${g.colspan}">
+        const rowspan = g.rowspan ? ` rowspan="${g.rowspan}"` : "";
+        return `<td class="rekap-cell rekap-cell-${g.key}" colspan="${g.colspan}"${rowspan}>
           <div class="cell-value rekap-omset">Rp 0</div>
         </td>`;
       }
       return (g.sub || []).map(s =>
-        `<td class="rekap-cell rekap-${g.key}"><div class="cell-value"></div></td>`
+        `<td class="rekap-cell rekap-cell-${g.key}"><div class="cell-value"></div></td>`
       ).join("");
     }).join("");
+
+    // pisahkan omset dari rekapCells — ditaruh di baris sub
+    const rekapCellsNoOmset = REKAP_GROUPS.filter(g => !g.rowspan).map(g => {
+      if (g.varian) {
+        return (varianList.length ? varianList : ["-"]).map(v =>
+          `<td class="rekap-cell rekap-cell-${g.key}"><div class="cell-value"></div></td>`
+        ).join("");
+      }
+      return (g.sub || []).map(() =>
+        `<td class="rekap-cell rekap-cell-${g.key}"><div class="cell-value"></div></td>`
+      ).join("");
+    }).join("");
+
+    const omsetGroup = REKAP_GROUPS.find(g => g.rowspan);
+    const omsetSubCell = omsetGroup
+      ? `<td class="rekap-cell rekap-cell-omset" colspan="${omsetGroup.colspan || 5}" rowspan="2">
+          <div class="cell-value rekap-omset">Rp 0</div>
+        </td>`
+      : "";
 
     tfoot.innerHTML = `
       <tr class="thead-rekap-row">
@@ -841,9 +862,10 @@ function renderTable() {
       </tr>
       <tr class="thead-rekap-sub">
         ${rekapSubCols}
+        ${omsetSubCell}
       </tr>
       <tr class="rekap-row">
-        ${rekapCells}
+        ${rekapCellsNoOmset}
       </tr>`;
   }
 }
@@ -1484,19 +1506,23 @@ function renderRekap(laporanAdmin = {}, dataHarianMap = {}) {
     }
 
     if (g.key === "omset") {
-      const totalOmset = filteredData.reduce((acc, d) => {
-        const harianDoc = dataHarianMap[d.customerId] || {};
-        return acc + (Number(harianDoc?.pembayaran?.bayarKonsumen) || 0);
-      }, 0);
+        const totalOmset = filteredData.reduce((acc, d) => {
+          const harianDoc = dataHarianMap[d.customerId] || {};
+          return acc + (Number(harianDoc?.pembayaran?.bayarKonsumen) || 0);
+        }, 0);
 
-      const formatted = totalOmset.toLocaleString("id-ID", {
-        style: "currency", currency: "IDR", minimumFractionDigits: 0
-      });
+        const formatted = totalOmset.toLocaleString("id-ID", {
+          style: "currency", currency: "IDR", minimumFractionDigits: 0
+        });
 
-      return `<td class="rekap-cell rekap-omset" colspan="${g.colspan || 4}">
-        <div class="cell-value rekap-omset">${totalOmset === 0 ? "Rp 0" : formatted}</div>
-      </td>`;
-    }
+        // update cell omset yang sudah dirender di baris sub
+        setTimeout(() => {
+          const omsetCell = tfoot?.querySelector(".rekap-cell-omset .cell-value");
+          if (omsetCell) omsetCell.textContent = totalOmset === 0 ? "Rp 0" : formatted;
+        }, 0);
+
+        return ""; // tidak render di rekap-row
+      }
     return (g.sub || []).map(() =>
       `<td class="rekap-cell rekap-${g.key}"><div class="cell-value"></div></td>`
     ).join("");
