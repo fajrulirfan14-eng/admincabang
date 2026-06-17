@@ -1648,10 +1648,12 @@ async function renderAnalisa() {
         ? Object.values(harianDoc.return  || {}).reduce((a, v) => a + (Number(v) || 0), 0) : null;
       const e = harianDoc
         ? Object.values(harianDoc.expired || {}).reduce((a, v) => a + (Number(v) || 0), 0) : null;
-      const p = harianDoc
+      const p  = harianDoc
         ? Object.values(harianDoc.pay     || {}).reduce((a, v) => a + (Number(v) || 0), 0) : null;
+      const cl = harianDoc
+        ? Object.values(harianDoc.closing || {}).reduce((a, v) => a + (Number(v) || 0), 0) : null;
       const status = harianDoc?.keterangan?.status || null;
-      return { minggu: idx + 1, tanggal: tStr, tgl: d.getDate(), r, e, p, status, hasData: !!harianDoc };
+      return { minggu: idx + 1, tanggal: tStr, tgl: d.getDate(), r, e, p, cl, status, hasData: !!harianDoc };
     });
 
     return {
@@ -1726,50 +1728,56 @@ async function renderAnalisa() {
 
     // hitung persentase per group
     function calcPersen(grp) {
-      const totalR = grp.reduce((a, h) => a + (h.hasData ? (h.r || 0) : 0), 0);
-      const totalE = grp.reduce((a, h) => a + (h.hasData ? (h.e || 0) : 0), 0);
-      const totalP = grp.reduce((a, h) => a + (h.hasData ? (h.p || 0) : 0), 0);
-      const rp = totalP > 0 ? Math.floor((totalR / totalP) * 100) : 0;
-      const ep = totalP > 0 ? Math.floor((totalE / totalP) * 100) : 0;
-      return { rp: rp + "%", ep: ep + "%" };
+      const totalR  = grp.reduce((a, h) => a + (h.hasData ? (h.r  || 0) : 0), 0);
+      const totalE  = grp.reduce((a, h) => a + (h.hasData ? (h.e  || 0) : 0), 0);
+      const totalP  = grp.reduce((a, h) => a + (h.hasData ? (h.p  || 0) : 0), 0);
+      const totalCl = grp.reduce((a, h) => a + (h.hasData ? (h.cl || 0) : 0), 0);
+      const rp  = totalP  > 0 ? Math.floor((totalR / totalP)  * 100) : 0;
+      const ep  = totalP  > 0 ? Math.floor((totalE / totalP)  * 100) : 0;
+      const pp  = totalCl > 0 ? Math.floor((totalP / totalCl) * 100) : 0;
+      return { rp: rp + "%", ep: ep + "%", pp: pp + "%" };
     }
     // hitung evaluasi akumulasi semua minggu
-    const evalR  = history.reduce((a, h) => a + (h.hasData ? (h.r || 0) : 0), 0);
-    const evalE  = history.reduce((a, h) => a + (h.hasData ? (h.e || 0) : 0), 0);
-    const evalP  = history.reduce((a, h) => a + (h.hasData ? (h.p || 0) : 0), 0);
-    const evalRp = evalP > 0 ? Math.floor((evalR / evalP) * 100) + "%" : "0%";
-    const evalEp = evalP > 0 ? Math.floor((evalE / evalP) * 100) + "%" : "0%";
+    const evalR  = history.reduce((a, h) => a + (h.hasData ? (h.r  || 0) : 0), 0);
+    const evalE  = history.reduce((a, h) => a + (h.hasData ? (h.e  || 0) : 0), 0);
+    const evalP  = history.reduce((a, h) => a + (h.hasData ? (h.p  || 0) : 0), 0);
+    const evalCl = history.reduce((a, h) => a + (h.hasData ? (h.cl || 0) : 0), 0);
+    const evalRp = evalP  > 0 ? Math.floor((evalR / evalP)  * 100) + "%" : "0%";
+    const evalEp = evalP  > 0 ? Math.floor((evalE / evalP)  * 100) + "%" : "0%";
+    const evalPp = evalCl > 0 ? Math.floor((evalP / evalCl) * 100) + "%" : "0%";
     const evalTP = history.filter(h => h.hasData && h.status?.toLowerCase() === "tutup").length;
     const evalPN = history.filter(h => h.hasData && h.status?.toLowerCase() === "pending").length;
 
     // ROW 1: header minggu + header persentase
     let mgHeaders = "";
-    groups.forEach(grp => {
+    groups.forEach((grp, gi) => {
+      const mc = `aht-mg-${(gi % 5) + 1}`;
       grp.forEach(h => {
         const isActive = h.minggu === mingguKe;
-        mgHeaders += `<th colspan="4" class="aht-mg-head ${isActive ? "aht-active" : ""}">
+        mgHeaders += `<th colspan="4" class="aht-mg-head ${mc} ${isActive ? "aht-active" : ""}">
           Mg${h.minggu} · ${h.tgl} ${bulanNama2[selectedBulan]}
         </th>`;
       });
-      mgHeaders += `<th colspan="2" class="aht-mg-head aht-persen-head">%</th>`;
+      mgHeaders += `<th colspan="3" class="aht-mg-head ${mc} aht-persen-head">%</th>`;
     });
     // kolom evaluasi di akhir
-    mgHeaders += `<th colspan="7" class="aht-mg-head aht-eval-head">Evaluasi</th>`;
+    mgHeaders += `<th colspan="8" class="aht-mg-head aht-eval-head">Evaluasi</th>`;
 
     // ROW 2: sub header R E P Ket + R% E%
     let subHeaders = "";
-    groups.forEach(grp => {
+    groups.forEach((grp, gi) => {
+      const sc = `aht-sub-${(gi % 5) + 1}`;
       grp.forEach(h => {
-        const ac = h.minggu === mingguKe ? "aht-active-col" : "";
         subHeaders += `
-          <th class="aht-sub aht-r-label ${ac}">R</th>
-          <th class="aht-sub aht-e-label ${ac}">E</th>
-          <th class="aht-sub aht-p-label ${ac}">P</th>
-          <th class="aht-sub aht-s-label ${ac}">Ket</th>`;
+          <th class="aht-sub ${sc} aht-r-label">R</th>
+          <th class="aht-sub ${sc} aht-e-label">E</th>
+          <th class="aht-sub ${sc} aht-p-label">P</th>
+          <th class="aht-sub ${sc} aht-s-label">Ket</th>`;
       });
       subHeaders += `
-        <th class="aht-sub aht-persen-r">R%</th>
-        <th class="aht-sub aht-persen-e">E%</th>`;
+        <th class="aht-sub ${sc} aht-persen-r">R%</th>
+        <th class="aht-sub ${sc} aht-persen-e">E%</th>
+        <th class="aht-sub ${sc} aht-persen-p">P%</th>`;
     });
     subHeaders += `
       <th class="aht-sub aht-eval-r">R</th>
@@ -1777,15 +1785,17 @@ async function renderAnalisa() {
       <th class="aht-sub aht-eval-p">P</th>
       <th class="aht-sub aht-eval-rp">R%</th>
       <th class="aht-sub aht-eval-ep">E%</th>
+      <th class="aht-sub aht-eval-pp">P%</th>
       <th class="aht-sub aht-eval-tp">TP</th>
       <th class="aht-sub aht-eval-pn">PN</th>`;
 
     // ROW 3: nilai + persentase
     let valueCells = "";
-    groups.forEach(grp => {
+    groups.forEach((grp, gi) => {
       grp.forEach(h => {
-        const ac  = h.minggu === mingguKe ? "aht-active-col" : "";
-        const sc  = h.status ? `aht-status-${h.status.toLowerCase()}` : "";
+        const isActive = h.minggu === mingguKe;
+        const ac  = isActive ? "aht-active" : "";
+        const stc = h.status ? `aht-status-${h.status.toLowerCase()}` : "";
         if (!h.hasData) {
           valueCells += `<td class="aht-empty ${ac}" colspan="4">—</td>`;
         } else {
@@ -1793,13 +1803,14 @@ async function renderAnalisa() {
             <td class="aht-val aht-r ${ac}">${h.r ?? "—"}</td>
             <td class="aht-val aht-e ${ac}">${h.e ?? "—"}</td>
             <td class="aht-val aht-p ${ac}">${h.p ?? "—"}</td>
-            <td class="aht-status-cell ${sc} ${ac}">${h.status || "—"}</td>`;
+            <td class="aht-status-cell ${stc} ${ac}">${h.status || "—"}</td>`;
         }
       });
-      const { rp, ep } = calcPersen(grp);
+      const { rp, ep, pp } = calcPersen(grp);
       valueCells += `
         <td class="aht-val aht-persen-r-val">${rp}</td>
-        <td class="aht-val aht-persen-e-val">${ep}</td>`;
+        <td class="aht-val aht-persen-e-val">${ep}</td>
+        <td class="aht-val aht-persen-p-val">${pp}</td>`;
     });
     // sel evaluasi
     valueCells += `
@@ -1808,6 +1819,7 @@ async function renderAnalisa() {
       <td class="aht-val aht-eval-p-val">${evalP || ""}</td>
       <td class="aht-val aht-eval-rp-val">${evalRp}</td>
       <td class="aht-val aht-eval-ep-val">${evalEp}</td>
+      <td class="aht-val aht-eval-pp-val">${evalPp}</td>
       <td class="aht-val aht-eval-tp-val">${evalTP || ""}</td>
       <td class="aht-val aht-eval-pn-val">${evalPN || ""}</td>`;
 
