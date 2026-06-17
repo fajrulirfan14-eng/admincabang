@@ -584,9 +584,9 @@ async function renderDefaultAside(){
   const countEl = document.getElementById("asideCustomerCount");
   const body = document.getElementById("asideBody");
   if (!ownerEl || !countEl || !body) return;
+  const selectedUser = usersCache.find(u => u.uid === selectedUserUid) || null;
   ownerEl.textContent =
-    selectedUserUid ===
-    "all"
+    selectedUserUid === "all"
       ? "Semua"
       : selectedUser?.nama || "-";
   document.getElementById(
