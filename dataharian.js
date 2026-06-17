@@ -2414,7 +2414,7 @@ async function renderLaporanTable(tDoc, tgl, namaHari) {
   const scroll = block.querySelector(".lh-scroll");
   if (scroll) {
     let dn = false, sx = 0, sl = 0;
-    scroll.addEventListener("mousedown", e => { dn=true; sx=e.pageX-scroll.offsetLeft; sl=scroll.scrollLeft; scroll.style.cursor="grabbing"; });
+    scroll.addEventListener("mousedown", e => { dn=true; sx=e.pageX-scroll.offsetLeft; sl=scroll.scrollLeft; scroll.style.cursor="grabbing"; e.preventDefault(); });
     document.addEventListener("mouseup", () => { dn=false; scroll.style.cursor=""; });
     document.addEventListener("mousemove", e => { if(!dn) return; scroll.scrollLeft = sl-(e.pageX-scroll.offsetLeft-sx); });
     let tx=0, tl=0;
