@@ -1616,29 +1616,48 @@ async function renderAnalisa() {
     }
   });
 
+  // ambil semua tanggal dari minggu 1 sampai minggu aktif di bulan ini
+  const semuaTanggal = hitungMingguDalamBulan(selectedHari, selectedBulan, selectedTahun)
+    .slice(0, mingguKe);
+
+  // load semua dataHarian per tanggal
+  const dataHarianPerTanggal = {};
+  for (const d of semuaTanggal) {
+    const tStr  = formatTanggal(d);
+    const cache = await getDataHarian(selectedKurirId, tStr);
+    dataHarianPerTanggal[tStr] = cache?.data || {};
+  }
+
   // customer aktif hari ini
   const activeCustomers = customerList.filter(c => c.hari === selectedHari);
 
-  // klasifikasi
+  // klasifikasi pakai latestMap seperti sebelumnya
   const result = activeCustomers.map(c => {
-    const cid     = c.id || c.uid;
-    const dsm     = latestMap[cid] || null;
+    const cid      = c.id || c.uid;
+    const dsm      = latestMap[cid] || null;
     const retTotal = dsm
-      ? Object.values(dsm.return  || {}).reduce((a, v) => a + (Number(v) || 0), 0)
-      : 0;
+      ? Object.values(dsm.return  || {}).reduce((a, v) => a + (Number(v) || 0), 0) : 0;
     const expTotal = dsm
-      ? Object.values(dsm.expired || {}).reduce((a, v) => a + (Number(v) || 0), 0)
-      : 0;
-    const closTotal = dsm
-      ? Object.values(dsm.closing || {}).reduce((a, v) => a + (Number(v) || 0), 0)
-      : 0;
-    const tanggalRef = dsm?._tanggal || dsm?.tanggal || null;
+      ? Object.values(dsm.expired || {}).reduce((a, v) => a + (Number(v) || 0), 0) : 0;
+
+    // history per minggu
+    const history = semuaTanggal.map((d, idx) => {
+      const tStr      = formatTanggal(d);
+      const harianDoc = dataHarianPerTanggal[tStr]?.[cid] || null;
+      const r = harianDoc
+        ? Object.values(harianDoc.return  || {}).reduce((a, v) => a + (Number(v) || 0), 0) : null;
+      const e = harianDoc
+        ? Object.values(harianDoc.expired || {}).reduce((a, v) => a + (Number(v) || 0), 0) : null;
+      const p = harianDoc
+        ? Object.values(harianDoc.pay     || {}).reduce((a, v) => a + (Number(v) || 0), 0) : null;
+      const status = harianDoc?.keterangan?.status || null;
+      return { minggu: idx + 1, tanggal: tStr, tgl: d.getDate(), r, e, p, status, hasData: !!harianDoc };
+    });
 
     return {
-      nama:     c.namaCustomer || "-",
-      status:   dsm ? triKlasifikasi(retTotal, expTotal, tri) : "grey",
-      tanggal:  tanggalRef,
-      retTotal, expTotal, closTotal
+      nama:    c.namaCustomer || "-",
+      status:  dsm ? triKlasifikasi(retTotal, expTotal, tri) : "grey",
+      retTotal, expTotal, history
     };
   });
 
@@ -1658,18 +1677,99 @@ async function renderAnalisa() {
   ).join(", ");
   setText("analisaSubtitle", `Referensi: ${refLabel}`);
 
+  const bulanNama2 = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agt","Sep","Okt","Nov","Des"];
+  function setupAhDragScroll() {
+    document.querySelectorAll(".ah-table-wrap").forEach(wrap => {
+      let isDown  = false;
+      let startX  = 0;
+      let scrollL = 0;
+
+      wrap.addEventListener("mousedown", e => {
+        isDown  = true;
+        startX  = e.pageX - wrap.offsetLeft;
+        scrollL = wrap.scrollLeft;
+        wrap.classList.add("grabbing");
+      });
+      document.addEventListener("mouseup", () => {
+        isDown = false;
+        wrap.classList.remove("grabbing");
+      });
+      document.addEventListener("mousemove", e => {
+        if (!isDown) return;
+        const x = e.pageX - wrap.offsetLeft;
+        wrap.scrollLeft = scrollL - (x - startX);
+      });
+
+      // touch
+      let tx = 0, tl = 0;
+      wrap.addEventListener("touchstart", e => {
+        tx = e.touches[0].pageX;
+        tl = wrap.scrollLeft;
+      }, { passive: true });
+      wrap.addEventListener("touchmove", e => {
+        wrap.scrollLeft = tl - (e.touches[0].pageX - tx);
+      }, { passive: true });
+    });
+  }
+
+  function buildHistoryRows(history) {
+    // row 1: header minggu (colspan 4)
+    const mgHeaders = history.map(h => {
+      const isActive = h.minggu === mingguKe;
+      return `<th colspan="4" class="aht-mg-head ${isActive ? "aht-active" : ""}">
+        Mg${h.minggu} · ${h.tgl} ${bulanNama2[selectedBulan]}
+      </th>`;
+    }).join("");
+
+    // row 2: sub header R E P Ket per minggu
+    const subHeaders = history.map(h => {
+      const isActive = h.minggu === mingguKe;
+      const ac = isActive ? "aht-active-col" : "";
+      return `
+        <th class="aht-sub aht-r-label ${ac}">R</th>
+        <th class="aht-sub aht-e-label ${ac}">E</th>
+        <th class="aht-sub aht-p-label ${ac}">P</th>
+        <th class="aht-sub aht-s-label ${ac}">Ket</th>`;
+    }).join("");
+
+    // row 3: nilai
+    const valueCells = history.map(h => {
+      const isActive = h.minggu === mingguKe;
+      const ac = isActive ? "aht-active-col" : "";
+      if (!h.hasData) {
+        return `
+          <td class="aht-empty ${ac}" colspan="4">—</td>`;
+      }
+      const sc = h.status ? `aht-status-${h.status.toLowerCase()}` : "";
+      return `
+        <td class="aht-val aht-r ${ac}">${h.r ?? "—"}</td>
+        <td class="aht-val aht-e ${ac}">${h.e ?? "—"}</td>
+        <td class="aht-val aht-p ${ac}">${h.p ?? "—"}</td>
+        <td class="aht-status-cell ${sc} ${ac}">${h.status || "—"}</td>`;
+    }).join("");
+
+    return `
+      <div class="ah-table-wrap">
+        <table class="ah-table">
+          <thead>
+            <tr>${mgHeaders}</tr>
+            <tr>${subHeaders}</tr>
+          </thead>
+          <tbody>
+            <tr>${valueCells}</tr>
+          </tbody>
+        </table>
+      </div>`;
+  }
+
   function buildGroup(title, color, data) {
     if (!data.length) return "";
     const items = data.map(c => `
       <div class="analisa-customer-item">
-        <div>
-          <div class="analisa-customer-name">${esc(c.nama)}</div>
-          <div class="analisa-customer-detail">
-            Return: ${c.retTotal} · Expired: ${c.expTotal} · Closing: ${c.closTotal}
-            ${c.tanggal ? ` · Data: ${c.tanggal}` : ""}
-          </div>
+        <div class="analisa-customer-name">${esc(c.nama)}</div>
+        <div class="ah-history">
+          ${buildHistoryRows(c.history)}
         </div>
-        <div class="analisa-customer-score">${c.retTotal + c.expTotal}</div>
       </div>`).join("");
 
     return `
@@ -1683,17 +1783,13 @@ async function renderAnalisa() {
   }
 
   groupEl.innerHTML =
-    buildGroup("🟢 Produktif",       "green",  green)  ||
-    buildGroup("🟡 Stabil",          "yellow", yellow) ||
-    buildGroup("🔴 Non Produktif",   "red",    red)    ||
-    buildGroup("⚪ Belum Ada Data",  "grey",   grey)   ||
-    `<div class="analisa-empty">Tidak ada customer</div>`;
-
-  groupEl.innerHTML =
     buildGroup("🟢 Produktif",      "green",  green)  +
     buildGroup("🟡 Stabil",         "yellow", yellow) +
     buildGroup("🔴 Non Produktif",  "red",    red)    +
-    buildGroup("⚪ Belum Ada Data", "grey",   grey);
+    buildGroup("⚪ Belum Ada Data", "grey",   grey)   ||
+    `<div class="analisa-empty">Tidak ada customer</div>`;
+
+  setupAhDragScroll();
 }
 
 /* ── HELPERS ───────────────────────────────── */
