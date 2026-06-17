@@ -1331,15 +1331,15 @@ function openPopupKeuangan(tanggal, omset = 0, keteranganTarget = 0, payData = {
     <div class="keuangan-form">
       <div class="keuangan-group">
         <label class="keuangan-label">Omset</label>
-        <input type="number" inputmode="numeric" class="keuangan-input" id="keuanganOmset" placeholder="Masukkan omset">
+        <input type="text" inputmode="numeric" class="keuangan-input" id="keuanganOmset" placeholder="Masukkan omset">
       </div>
       <div class="keuangan-group">
         <label class="keuangan-label">Klaim Insentif</label>
-        <input type="number" inputmode="numeric" class="keuangan-input" id="keuanganInsentif" placeholder="Masukkan insentif">
+        <input type="text" inputmode="numeric" class="keuangan-input" id="keuanganInsentif" placeholder="Masukkan insentif">
       </div>
       <div class="keuangan-group">
         <label class="keuangan-label">Kasbon</label>
-        <input type="number" inputmode="numeric" class="keuangan-input" id="keuanganKasbon" placeholder="Masukkan kasbon">
+        <input type="text" inputmode="numeric" class="keuangan-input" id="keuanganKasbon" placeholder="Masukkan kasbon">
       </div>
       <div class="keuangan-bonus-box">
         <div class="keuangan-bonus-title">Bonus</div>
@@ -1362,7 +1362,7 @@ function openPopupKeuangan(tanggal, omset = 0, keteranganTarget = 0, payData = {
     if (!input) return;
     input.addEventListener("input", () => {
       const angka = input.value.replace(/\D/g, "");
-      input.value = angka ? Number(angka).toLocaleString("id-ID") : "";
+      input.value = angka ? angka.replace(/\B(?=(\d{3})+(?!\d))/g, ".") : "";
     });
   }
   formatInputRibuan(inputOmset);
@@ -1490,7 +1490,7 @@ function openPopupKeuangan(tanggal, omset = 0, keteranganTarget = 0, payData = {
       const bonusKunjungan  = Number(document.getElementById("bonusKunjunganVal")?.textContent.replace(/[^0-9]/g, "")) || 0;
       const bonusPay        = Number(document.getElementById("bonusPayVal")?.textContent.replace(/[^0-9]/g, ""))        || 0;
       const jumlahBonus     = bonusInsentif + bonusKunjungan + bonusPay;
-      const inputOmsetValue = Number(inputOmset.value.replace(/\./g, "")) || 0;
+      const inputOmsetValue = Number(inputOmset.value.replace(/\./g, "").replace(/,/g, "")) || 0;
       const grossMargin     = inputOmsetValue - jumlahUangClosing;
       const upahHarian      = Number(kc2?.upahHarian) || 0;
 
@@ -1506,8 +1506,8 @@ function openPopupKeuangan(tanggal, omset = 0, keteranganTarget = 0, payData = {
           omset, inputOmset: inputOmsetValue, grossMargin,
           profitSekarang: grossMargin - jumlahBonus - upahHarian,
           profitKemarin: pay.margin - expired.margin - jumlahBonus - upahHarian,
-          klaimInsentif: Number(inputInsentif?.value?.replace(/\./g, "")) || 0,
-          kasbon:        Number(inputKasbon?.value?.replace(/\./g, ""))   || 0,
+          klaimInsentif: Number(inputInsentif?.value?.replace(/\./g, "").replace(/,/g, "")) || 0,
+          kasbon:        Number(inputKasbon?.value?.replace(/\./g, "").replace(/,/g, ""))   || 0,
           bonus: { bonusInsentif, bonusKunjungan, bonusPay, jumlahBonus }
         }
       };
