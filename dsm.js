@@ -1733,6 +1733,14 @@ async function renderAnalisa() {
       const ep = totalP > 0 ? ((totalE / totalP) * 100).toFixed(1) : 0;
       return { rp: rp + "%", ep: ep + "%" };
     }
+    // hitung evaluasi akumulasi semua minggu
+    const evalR  = history.reduce((a, h) => a + (h.hasData ? (h.r || 0) : 0), 0);
+    const evalE  = history.reduce((a, h) => a + (h.hasData ? (h.e || 0) : 0), 0);
+    const evalP  = history.reduce((a, h) => a + (h.hasData ? (h.p || 0) : 0), 0);
+    const evalRp = evalP > 0 ? ((evalR / evalP) * 100).toFixed(1) + "%" : "0%";
+    const evalEp = evalP > 0 ? ((evalE / evalP) * 100).toFixed(1) + "%" : "0%";
+    const evalTP = history.filter(h => h.hasData && h.status?.toLowerCase() === "tutup").length;
+    const evalPN = history.filter(h => h.hasData && h.status?.toLowerCase() === "pending").length;
 
     // ROW 1: header minggu + header persentase
     let mgHeaders = "";
@@ -1745,6 +1753,8 @@ async function renderAnalisa() {
       });
       mgHeaders += `<th colspan="2" class="aht-mg-head aht-persen-head">%</th>`;
     });
+    // kolom evaluasi di akhir
+    mgHeaders += `<th colspan="7" class="aht-mg-head aht-eval-head">Evaluasi</th>`;
 
     // ROW 2: sub header R E P Ket + R% E%
     let subHeaders = "";
@@ -1761,6 +1771,14 @@ async function renderAnalisa() {
         <th class="aht-sub aht-persen-r">R%</th>
         <th class="aht-sub aht-persen-e">E%</th>`;
     });
+    subHeaders += `
+      <th class="aht-sub aht-eval-r">R</th>
+      <th class="aht-sub aht-eval-e">E</th>
+      <th class="aht-sub aht-eval-p">P</th>
+      <th class="aht-sub aht-eval-rp">R%</th>
+      <th class="aht-sub aht-eval-ep">E%</th>
+      <th class="aht-sub aht-eval-tp">TP</th>
+      <th class="aht-sub aht-eval-pn">PN</th>`;
 
     // ROW 3: nilai + persentase
     let valueCells = "";
@@ -1783,6 +1801,15 @@ async function renderAnalisa() {
         <td class="aht-val aht-persen-r-val">${rp}</td>
         <td class="aht-val aht-persen-e-val">${ep}</td>`;
     });
+    // sel evaluasi
+    valueCells += `
+      <td class="aht-val aht-eval-r-val">${evalR || ""}</td>
+      <td class="aht-val aht-eval-e-val">${evalE || ""}</td>
+      <td class="aht-val aht-eval-p-val">${evalP || ""}</td>
+      <td class="aht-val aht-eval-rp-val">${evalRp}</td>
+      <td class="aht-val aht-eval-ep-val">${evalEp}</td>
+      <td class="aht-val aht-eval-tp-val">${evalTP || ""}</td>
+      <td class="aht-val aht-eval-pn-val">${evalPN || ""}</td>`;
 
     return `
       <div class="ah-table-wrap">

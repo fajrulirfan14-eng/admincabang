@@ -658,6 +658,40 @@ tbody tr:hover .cell-closing   {background:rgba(74,138,74,.10)}
 .aht-status-pending{background:#FEF9EC;color:#C0924A}
 .aht-status-putus  {background:#F5F5F5;color:#888}
 
+/* PERSENTASE */
+.aht-persen-head{
+  background:var(--primary-light) !important;
+  color:var(--primary-dark) !important;
+  font-weight:800;
+  min-width:80px;
+}
+.aht-persen-r{background:#FFF0EE;color:#C45A4A;font-weight:700}
+.aht-persen-e{background:#FFF8EE;color:#C47A2A;font-weight:700}
+.aht-persen-r-val{background:#FFF0EE;color:#C45A4A;font-weight:700}
+.aht-persen-e-val{background:#FFF8EE;color:#C47A2A;font-weight:700}
+
+/* EVALUASI */
+.aht-eval-head{
+  background:#3A312A !important;
+  color:#fff !important;
+  font-weight:800;
+}
+.aht-eval-r   {background:#4A2020;color:rgba(255,255,255,.85);font-weight:700}
+.aht-eval-e   {background:#4A3020;color:rgba(255,255,255,.85);font-weight:700}
+.aht-eval-p   {background:#3A2040;color:rgba(255,255,255,.85);font-weight:700}
+.aht-eval-rp  {background:#5A2020;color:rgba(255,255,255,.85);font-weight:700}
+.aht-eval-ep  {background:#5A3820;color:rgba(255,255,255,.85);font-weight:700}
+.aht-eval-tp  {background:#4A1A1A;color:rgba(255,255,255,.85);font-weight:700}
+.aht-eval-pn  {background:#2A3A1A;color:rgba(255,255,255,.85);font-weight:700}
+
+.aht-eval-r-val  {background:rgba(196,90,74,.08);color:#C45A4A;font-weight:700}
+.aht-eval-e-val  {background:rgba(196,122,42,.08);color:#C47A2A;font-weight:700}
+.aht-eval-p-val  {background:rgba(196,74,138,.08);color:#C44A8A;font-weight:700}
+.aht-eval-rp-val {background:rgba(196,90,74,.14);color:#C45A4A;font-weight:800}
+.aht-eval-ep-val {background:rgba(196,122,42,.14);color:#C47A2A;font-weight:800}
+.aht-eval-tp-val {background:rgba(192,83,74,.12);color:#C0534A;font-weight:800}
+.aht-eval-pn-val {background:rgba(192,146,74,.12);color:#C0924A;font-weight:800}
+
 /* ANALISA EMPTY & SCORE */
 .grey .analisa-customer-score{background:#F5F5F5;color:#999}
 .analisa-empty{text-align:center;padding:32px;font-size:13px;color:var(--text-muted)}
