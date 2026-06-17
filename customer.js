@@ -45,7 +45,7 @@ function savePacState() {
   localStorage.setItem("pac_pemilikNama", pacState.pemilikNama);
   localStorage.setItem("pac_hari",        pacState.hari);
 }
-
+let cacheNonAktif = null;
 let rollingMode = false;
 let draggedCustomer = null;
 let longPressTimer = null;
@@ -72,6 +72,9 @@ onAuthStateChanged(
     await renderCustomerList();
     await renderDefaultAside();
     await renderApprovalList();
+    document.getElementById("nonAktifBtn")?.addEventListener("click", () => {
+      renderNonAktifAside();
+    });
   }
 );
 function openDB() {
@@ -311,19 +314,8 @@ async function renderCustomerList() {
         <div class="customer-actions">
     
           <button
-            class="customer-action-btn
-              ${c.status === false ? "disabled" : ""}
-            "
-            title="${
-              c.status === false
-                ? "Sudah Dihapus"
-                : "Hapus"
-            }"
-            ${
-              c.status === false
-                ? "disabled"
-                : ""
-            }
+            class="customer-action-btn ${c.status === false ? "customer-hapus-permanen-btn" : ""}"
+            title="${c.status === false ? "Hapus Permanen" : "Hapus"}"
           >
             <svg viewBox="0 0 24 24" fill="none">
               <path d="M3 6h18"/>
@@ -513,28 +505,180 @@ function setupDropdown(){
     }
   );
 }
+async function loadCustomerNonAktif(forceReload = false) {
+  if (cacheNonAktif && !forceReload) return cacheNonAktif;
+
+  const me       = usersCache.find(u => u.uid === currentUser?.uid);
+  const idCabang = me?.idCabang;
+  if (!idCabang) return [];
+
+  try {
+    const snap = await getDocs(query(
+      collection(db, "customerNonAktif"),
+      where("idCabang", "==", idCabang)
+    ));
+    cacheNonAktif = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    return cacheNonAktif;
+  } catch (err) {
+    console.error("Gagal load customerNonAktif:", err);
+    return [];
+  }
+}
+async function renderNonAktifAside() {
+  const body = document.getElementById("asideBody");
+  if (!body) return;
+
+  body.innerHTML = `<div class="nonaktif-loading">Memuat...</div>`;
+
+  const list = await loadCustomerNonAktif();
+
+  // filter sesuai filter aktif
+  let filtered = [...list];
+
+  if (selectedUserUid !== "all") {
+    filtered = filtered.filter(c => c.pemilik === selectedUserUid);
+  }
+  if (selectedHariFilter !== "Semua") {
+    filtered = filtered.filter(c => c.hari === selectedHariFilter);
+  }
+  if (customerSearchKeyword) {
+    filtered = filtered.filter(c =>
+      (c.namaCustomer || "").toLowerCase().includes(customerSearchKeyword.toLowerCase())
+    );
+  }
+
+  // update count
+  const countEl = document.getElementById("asideCustomerCount");
+  if (countEl) countEl.textContent = filtered.length;
+
+  if (!filtered.length) {
+    body.innerHTML = `<div class="nonaktif-empty">Tidak ada customer non aktif</div>`;
+    return;
+  }
+
+  body.innerHTML = `
+    <div class="nonaktif-header">
+      <div class="nonaktif-title">Customer Non Aktif</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div class="nonaktif-count">${filtered.length} customer</div>
+        <button class="nonaktif-refresh-btn" id="btnRefreshNonAktif">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+    <div class="nonaktif-list">
+      ${filtered.map(c => {
+        const pemilikUser = usersCache.find(u => u.uid === c.pemilik);
+        const namaPemilik = pemilikUser?.nama || "-";
+        const nama        = c.namaCustomer || "-";
+        const inisial     = nama.charAt(0).toUpperCase();
+        const avatarHtml  = c.foto
+          ? `<img class="nonaktif-foto" src="${c.foto}" alt="${nama}">`
+          : `<div class="nonaktif-foto nonaktif-foto-empty">${inisial}</div>`;
+
+        const toDate = (val) => {
+          if (!val) return null;
+          if (val?.seconds) return new Date(val.seconds * 1000);
+          if (val instanceof Date) return val;
+          if (typeof val === "number") return new Date(val);
+          return null;
+        };
+        const nonAktifDate = toDate(c.createdAt);
+        const nonAktifAt   = nonAktifDate
+          ? nonAktifDate.toLocaleDateString("id-ID", {
+              weekday: "long", day: "numeric", month: "long", year: "numeric"
+            })
+          : "-";
+
+        return `
+          <div class="nonaktif-item">
+            ${avatarHtml}
+            <div class="nonaktif-info">
+              <div class="nonaktif-nama">${nama}</div>
+              <div class="nonaktif-pemilik">${namaPemilik}</div>
+              <div class="nonaktif-date">Nonaktif: ${nonAktifAt}</div>
+            </div>
+          </div>`;
+      }).join("")}
+    </div>`;
+    document.getElementById("btnRefreshNonAktif")?.addEventListener("click", async () => {
+    const btn = document.getElementById("btnRefreshNonAktif");
+    if (btn) { btn.disabled = true; btn.classList.add("spinning"); }
+    cacheNonAktif = null;
+    await renderNonAktifAside();
+  });
+}
+let _toastTimer = null;
+function showToastCustomer(pesan, type = "success") {
+  const existing = document.getElementById("customerToast");
+  if (existing) existing.remove();
+  clearTimeout(_toastTimer);
+
+  const toast = document.createElement("div");
+  toast.id        = "customerToast";
+  toast.className = `customer-toast ${type}`;
+  toast.textContent = pesan;
+  document.body.appendChild(toast);
+
+  requestAnimationFrame(() => toast.classList.add("show"));
+  _toastTimer = setTimeout(() => {
+    toast.classList.remove("show");
+    setTimeout(() => toast.remove(), 300);
+  }, 2800);
+}
+function showReloadWarning(pesan) {
+  const existing = document.getElementById("reloadWarningToast");
+  if (existing) existing.remove();
+
+  const btn = document.getElementById("reloadCustomerBtn");
+  const toast = document.createElement("div");
+  toast.id = "reloadWarningToast";
+  toast.textContent = pesan;
+  toast.className = "reload-warning-toast";
+
+  // posisi di bawah tombol reload
+  document.body.appendChild(toast);
+  if (btn) {
+    const rect = btn.getBoundingClientRect();
+    toast.style.top  = `${rect.bottom + 8}px`;
+    toast.style.left = `${rect.left + rect.width / 2}px`;
+  }
+
+  setTimeout(() => toast.remove(), 2500);
+}
 function setupReloadButton(){
   const btn = document.getElementById("reloadCustomerBtn");
   if (!btn)
     return;
-  btn.addEventListener("click",
-  async () => {
+  btn.addEventListener("click", async () => {
+    // validasi: harus pilih kurir spesifik
+    if (selectedUserUid === "all") {
+      showReloadWarning("Pilih kurir terlebih dahulu sebelum reload.");
+      return;
+    }
+    // validasi: harus pilih hari spesifik
+    if (selectedHariFilter === "Semua") {
+      showReloadWarning("Pilih hari terlebih dahulu sebelum reload.");
+      return;
+    }
+
     try {
       btn.disabled = true;
       btn.classList.add("loading");
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      // Ambil users createdBy adminCabang
+      await new Promise(resolve => setTimeout(resolve, 800));
+
+      // Ambil users (tetap ambil semua untuk cache)
       const usersSnap = await getDocs(query(
         collection(db, "users"),
         where("createdBy", "==", currentUser.uid)
       ));
       const usersData = usersSnap.docs.map(d => ({ uid: d.id, ...d.data() }));
-      // Tambah data admin sendiri
       const adminSnap = await getDoc(doc(db, "users", currentUser.uid));
       if (adminSnap.exists()) {
         usersData.push({ uid: currentUser.uid, ...adminSnap.data() });
       }
-      // Clear store users dulu sebelum isi ulang
       const udb = await openDB();
       await new Promise((resolve, reject) => {
         const tx = udb.transaction(STORE_USERS, "readwrite");
@@ -546,38 +690,57 @@ function setupReloadButton(){
       usersCache = usersData;
       renderDropdownUsers();
 
-      // Ambil idCabang dari data admin yang baru diambil
       const adminCabang = usersData.find(u => u.uid === currentUser.uid);
       if (!adminCabang?.idCabang) {
         console.error("idCabang tidak ditemukan");
         return;
       }
 
-      // Ambil customer
+      // Query customer sesuai pemilik + hari yang dipilih
       const customerSnap = await getDocs(query(
         collection(db, "customer"),
-        where("idCabang", "==", adminCabang.idCabang)
+        where("idCabang", "==", adminCabang.idCabang),
+        where("pemilik",  "==", selectedUserUid),
+        where("hari",     "==", selectedHariFilter)
       ));
       const customerData = customerSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-      // Clear dulu baru isi ulang supaya data terhapus ikut hilang
-      const cdb   = await openCustomerDB();
-      await new Promise((resolve, reject) => {
-        const tx    = cdb.transaction(STORE_CUSTOMER, "readwrite");
-        tx.objectStore(STORE_CUSTOMER).clear();
-        tx.oncomplete = () => resolve();
-        tx.onerror    = () => reject(tx.error);
+      console.log(`📦 Firestore hasil: ${customerData.length} customer`);
+      console.log(`🗑️ IndexedDB akan hapus: pemilik=${selectedUserUid} hari=${selectedHariFilter}`);
+      customerData.forEach(c => console.log(`  - ${c.namaCustomer} status:${c.status}`));
+
+      // Hapus hanya customer dengan pemilik + hari yang sama di IndexedDB
+      const cdb = await openCustomerDB();
+      const existing = await new Promise((resolve, reject) => {
+        const tx  = cdb.transaction(STORE_CUSTOMER, "readonly");
+        const req = tx.objectStore(STORE_CUSTOMER).getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror   = () => reject(req.error);
       });
+      const toDelete = existing.filter(c =>
+        c.pemilik === selectedUserUid && c.hari === selectedHariFilter
+      );
+      if (toDelete.length) {
+        await new Promise((resolve, reject) => {
+          const tx    = cdb.transaction(STORE_CUSTOMER, "readwrite");
+          const store = tx.objectStore(STORE_CUSTOMER);
+          toDelete.forEach(c => store.delete(c.id));
+          tx.oncomplete = () => resolve();
+          tx.onerror    = () => reject(tx.error);
+        });
+      }
+
+      // Simpan data baru
       await saveCustomerToIndexedDB(customerData);
       await renderCustomerList();
       await renderDefaultAside();
+
     } catch (error) {
       console.error("Gagal reload:", error);
     } finally {
       btn.disabled = false;
       btn.classList.remove("loading");
     }
-  }
-);
+  });
 }
 async function renderDefaultAside(){
   const ownerEl = document.getElementById("asideOwnerText");
@@ -2008,20 +2171,16 @@ function renderCustomerMapAside(customer){
 }
 function setupDeleteCustomerButtons(filtered){
   document
-    .querySelectorAll(
-      '.customer-action-btn[title="Hapus"]'
-    )
-    .forEach((btn,index)=>{
-
+    .querySelectorAll('.customer-action-btn[title="Hapus"], .customer-action-btn[title="Hapus Permanen"]')
+    .forEach((btn, index) => {
       btn.onclick = e => {
         e.stopPropagation();
-
-        const customer =
-          filtered[index];
-
-        openDeletePopup(
-          customer
-        );
+        const customer = filtered[index];
+        if (customer.status === false) {
+          openHapusPermanen(customer);
+        } else {
+          openDeletePopup(customer);
+        }
       };
     });
 }
@@ -2131,6 +2290,82 @@ function openDeletePopup(customer){
         confirmBtn.textContent = "Hapus";
       }
     };
+}
+function openHapusPermanen(customer) {
+  const popup   = document.getElementById("hapusPermanenPopup");
+  const text    = document.getElementById("hapusPermanenText");
+  const batalBtn   = document.getElementById("batalHapusPermanenBtn");
+  const lanjutBtn  = document.getElementById("lanjutHapusPermanenBtn");
+  if (!popup || !text || !batalBtn || !lanjutBtn) return;
+
+  text.innerHTML = `Hapus <b>${customer.namaCustomer || "-"}</b> permanen selamanya? Tindakan ini tidak dapat dibatalkan.`;
+  popup.classList.add("show");
+
+  batalBtn.onclick = () => popup.classList.remove("show");
+
+  lanjutBtn.onclick = async () => {
+    try {
+      lanjutBtn.disabled   = true;
+      lanjutBtn.textContent = "Menghapus...";
+
+      // 1. Simpan ke customerNonAktif dulu
+      const { setDoc, doc: fsDoc, deleteDoc, collection: fsCol, getDocs: fsGetDocs, serverTimestamp: fsST } =
+        await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+
+      // normalisasi createdAt ke seconds
+      let createdAtVal = null;
+      if (customer.createdAt?.seconds) {
+        createdAtVal = customer.createdAt; // sudah Firestore Timestamp format
+      } else if (typeof customer.createdAt === "number") {
+        createdAtVal = { seconds: Math.floor(customer.createdAt / 1000), nanoseconds: 0 };
+      }
+
+      await setDoc(fsDoc(db, "customerNonAktif", customer.id), {
+        namaCustomer:    customer.namaCustomer    || "",
+        idCabang:        customer.idCabang        || "",
+        createdBy:       customer.createdBy       || "",
+        pemilik:         customer.pemilik         || "",
+        createdAt:       createdAtVal,
+        foto:            customer.foto            || "",
+        lokasiCustomer:  customer.lokasiCustomer  || null,
+        hari:            customer.hari            || "",
+        nonAktifAt:      { seconds: Math.floor(Date.now() / 1000), nanoseconds: 0 },
+      });
+
+      // 2. Hapus subcollection dataHarian kalau ada
+      try {
+        const subSnap = await fsGetDocs(fsCol(db, "customer", customer.id, "dataHarian"));
+        for (const d of subSnap.docs) {
+          await deleteDoc(d.ref);
+        }
+      } catch (_) {}
+
+      // 3. Hapus dokumen customer
+      await deleteDoc(fsDoc(db, "customer", customer.id));
+
+      // 4. Hapus dari IndexedDB
+      const cdb = await openCustomerDB();
+      await new Promise((resolve, reject) => {
+        const tx = cdb.transaction(STORE_CUSTOMER, "readwrite");
+        tx.objectStore(STORE_CUSTOMER).delete(customer.id);
+        tx.oncomplete = () => resolve();
+        tx.onerror    = () => reject(tx.error);
+      });
+
+      popup.classList.remove("show");
+      cacheNonAktif = null; // reset cache
+      showToastCustomer(`${customer.namaCustomer || "Customer"} berhasil dihapus permanen`);
+      await renderCustomerList();
+      await renderDefaultAside();
+
+    } catch (err) {
+      console.error("Hapus permanen gagal:", err);
+      showToastCustomer("Gagal menghapus permanen", "error");
+    } finally {
+      lanjutBtn.disabled    = false;
+      lanjutBtn.textContent = "Lanjutkan";
+    }
+  };
 }
 function openRestorePopup(customer){
   const popup = document.getElementById(

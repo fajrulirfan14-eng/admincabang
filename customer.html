@@ -43,6 +43,15 @@
       </div>
     </div>
     <div class="header-actions">
+      <button id="nonAktifBtn" class="header-btn" aria-label="Customer Non Aktif">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="3 6 5 6 21 6"/>
+          <path d="M19 6l-1 14H6L5 6"/>
+          <path d="M8 6V4h8v2"/>
+          <path d="M10 11v6"/>
+          <path d="M14 11v6"/>
+        </svg>
+      </button>
       <button id="addCustomerBtn" class="header-btn" aria-label="Tambah Customer">
         <svg viewBox="0 0 24 24" fill="none">
           <path d="M12 5v14M5 12h14"/>
@@ -272,31 +281,17 @@
 
 <div id="deleteCustomerPopup" class="delete-popup-overlay">
   <div class="delete-popup-card">
-
     <div class="delete-popup-title">
       Hapus Customer
     </div>
-
-    <div
-      id="deletePopupText"
-      class="delete-popup-subtitle"
-    >
+    <div id="deletePopupText" class="delete-popup-subtitle">
       Yakin ingin hapus customer?
     </div>
-
     <div class="delete-popup-actions">
-
-      <button
-        id="cancelDeleteBtn"
-        class="delete-popup-btn cancel"
-      >
+      <button id="cancelDeleteBtn" class="delete-popup-btn cancel">
         Batal
       </button>
-
-      <button
-        id="confirmDeleteBtn"
-        class="delete-popup-btn danger"
-      >
+      <button id="confirmDeleteBtn" class="delete-popup-btn danger">
         Hapus
       </button>
 
@@ -307,36 +302,33 @@
 
 <div id="restoreCustomerPopup" class="delete-popup-overlay">
   <div class="delete-popup-card">
-
     <div class="delete-popup-title">
       Kembalikan Customer
     </div>
-
-    <div
-      id="restorePopupText"
-      class="delete-popup-subtitle"
-    >
+    <div id="restorePopupText" class="delete-popup-subtitle">
       Yakin ingin mengembalikan customer?
     </div>
-
     <div class="delete-popup-actions">
-
-      <button
-        id="cancelRestoreBtn"
-        class="delete-popup-btn cancel"
-      >
+      <button id="cancelRestoreBtn" class="delete-popup-btn cancel">
         Batal
       </button>
-
-      <button
-        id="confirmRestoreBtn"
-        class="delete-popup-btn success"
-      >
+      <button id="confirmRestoreBtn" class="delete-popup-btn success">
         Kembalikan
       </button>
-
     </div>
-
+  </div>
+</div>
+<!-- POPUP HAPUS PERMANEN -->
+<div class="delete-popup-overlay" id="hapusPermanenPopup">
+  <div class="delete-popup-card">
+    <div class="delete-popup-title">Hapus Permanen</div>
+    <div class="delete-popup-subtitle" id="hapusPermanenText">
+      Customer ini akan dihapus permanen selamanya.
+    </div>
+    <div class="delete-popup-actions">
+      <button class="delete-popup-btn cancel" id="batalHapusPermanenBtn">Batal</button>
+      <button class="delete-popup-btn danger" id="lanjutHapusPermanenBtn">Lanjutkan</button>
+    </div>
   </div>
 </div>
 
@@ -418,6 +410,7 @@
 <script src="navbar.js"></script>
 <script type="module" src="customer.js"></script>
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-
+<div id="devConsoleMount"></div>
+<script src="devconsole.js"></script>
 </body>
 </html>
