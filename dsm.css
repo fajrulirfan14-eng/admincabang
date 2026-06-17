@@ -294,7 +294,31 @@ tbody tr:hover td.td-nama{background:var(--bg)}
 }
 
 /* NAMA CUSTOMER */
+.nama-customer-wrap{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .nama-customer{font-size:13px;font-weight:600;color:var(--text)}
+
+/* STATUS BADGE */
+.status-badge{
+  display:inline-flex;align-items:center;justify-content:center;
+  padding:2px 7px;border-radius:99px;
+  font-size:10px;font-weight:800;
+  cursor:pointer;transition:.15s;
+  letter-spacing:.04em;flex-shrink:0;
+  user-select:none;
+}
+.status-badge:hover{opacity:.8;transform:scale(.95)}
+.status-badge-tutup  {background:#FDECEA;color:#C0534A;border:1px solid #f0b0aa}
+.status-badge-pending{background:#FEF9EC;color:#C0924A;border:1px solid #f0d9a0}
+.status-badge-putus  {background:#F5F5F5;color:#888;border:1px solid #ddd}
+
+/* FOTO POPUP */
+.foto-overlay{align-items:center;justify-content:center}
+.foto-no-img{
+  display:flex;flex-direction:column;align-items:center;gap:10px;
+  padding:40px 0;color:var(--text-muted);
+}
+.foto-no-img svg{width:40px;height:40px;stroke:var(--border)}
+.foto-no-img span{font-size:13px}
 .nama-customer-sub{font-size:11px;color:var(--text-muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px}
 .nama-customer-badge{display:inline-block;margin-top:3px;font-size:10px;font-weight:700;color:#999;background:#f0f0f0;border-radius:4px;padding:1px 6px;letter-spacing:.03em}
 
@@ -479,6 +503,12 @@ tbody tr:hover .cell-closing   {background:rgba(74,138,74,.10)}
   justify-content:space-between;
   gap:12px;
   margin-bottom:18px;
+}
+.analisa-header-actions{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-shrink:0;
 }
 .analisa-title{
   font-size:16px;
@@ -687,6 +717,111 @@ tbody tr:hover .cell-closing   {background:rgba(74,138,74,.10)}
 .aht-eval-pp-val {background:rgba(106,74,196,.12);color:#6A4AC4;font-weight:700}
 .aht-eval-tp-val {background:rgba(192,83,74,.10);color:#C0534A;font-weight:700}
 .aht-eval-pn-val {background:rgba(192,146,74,.10);color:#C0924A;font-weight:700}
+/* CATATAN */
+.aht-catatan-sub{
+  background:var(--primary-light);
+  color:var(--primary-dark);
+  font-weight:700;
+}
+.aht-catatan-val{
+  background:var(--bg);
+  text-align:center;
+  padding:6px 8px !important;
+}
+/* NOTIF ANALISA TABS */
+.notif-analisa-tabs{
+  display:flex;gap:6px;
+  margin-bottom:14px;
+}
+.notif-analisa-tab{
+  flex:1;height:34px;border-radius:10px;
+  border:1px solid var(--border);background:var(--card);
+  font-family:inherit;font-size:13px;font-weight:600;
+  color:var(--text-muted);cursor:pointer;transition:.15s;
+}
+.notif-analisa-tab.active{
+  background:var(--primary);border-color:var(--primary);color:#fff;
+}
+.notif-analisa-tab:hover:not(.active){
+  border-color:var(--primary);color:var(--primary-dark);
+}
+
+/* NOTIF HISTORY */
+.notif-history-empty{
+  text-align:center;padding:32px 16px;
+  font-size:13px;color:var(--text-muted);
+}
+.notif-history-item{
+  padding:12px 0;border-bottom:1px solid var(--border);
+  display:flex;flex-direction:column;gap:4px;
+}
+.notif-history-item:last-child{border-bottom:none}
+.notif-history-top{
+  display:flex;align-items:center;
+  justify-content:space-between;gap:8px;
+}
+.notif-history-kurir{
+  font-size:13px;font-weight:700;color:var(--text);
+}
+.notif-history-tgl{
+  font-size:11px;color:var(--text-muted);white-space:nowrap;
+}
+.notif-history-mg{
+  font-size:11px;font-weight:600;color:var(--primary-dark);
+}
+.notif-history-pesan{
+  font-size:12px;color:var(--text-muted);line-height:1.5;
+}
+.notif-history-read{
+  display:inline-flex;align-items:center;gap:4px;
+  font-size:11px;font-weight:600;color:#4E9B63;margin-top:2px;
+}
+.notif-history-item{
+  display:flex;align-items:flex-start;gap:10px;
+  padding:12px 0;border-bottom:1px solid var(--border);
+  cursor:default;transition:background .15s;
+  border-radius:8px;
+}
+.notif-history-item:last-child{border-bottom:none}
+.notif-history-item.select-mode{cursor:pointer;padding:10px 8px}
+.notif-history-item.selected{background:var(--primary-light);border-radius:8px}
+.notif-history-content{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}
+
+.notif-checkbox{
+  width:20px;height:20px;border-radius:6px;
+  border:2px solid var(--border);background:var(--card);
+  flex-shrink:0;display:flex;align-items:center;justify-content:center;
+  transition:.15s;margin-top:2px;
+}
+.notif-checkbox.checked{
+  background:var(--primary);border-color:var(--primary);
+}
+.notif-checkbox svg{width:12px;height:12px;stroke:#fff}
+
+.notif-select-toolbar{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:8px 0 12px;border-bottom:1px solid var(--border);
+  margin-bottom:8px;gap:8px;
+}
+.notif-select-count{
+  font-size:13px;font-weight:600;color:var(--text);
+}
+.catatan-head-btn{
+  display:inline-flex;align-items:center;gap:4px;
+  background:none;border:none;cursor:pointer;
+  font-family:inherit;font-size:10px;font-weight:700;
+  color:var(--primary-dark);transition:.15s;
+  padding:2px 4px;border-radius:6px;
+}
+.catatan-head-btn svg{width:12px;height:12px;stroke:currentColor;flex-shrink:0}
+.catatan-head-btn:hover{background:rgba(201,166,123,.2)}
+.catatan-tgl{
+  font-size:9px;font-weight:600;
+  color:var(--text-muted);
+  white-space:normal;text-align:center;
+  line-height:1.4;display:block;
+  max-width:90px;
+}
 
 /* ANALISA EMPTY & SCORE */
 .grey .analisa-customer-score{background:#F5F5F5;color:#999}
@@ -737,6 +872,10 @@ tbody tr:hover .cell-closing   {background:rgba(74,138,74,.10)}
   .analisa-customer-item{padding:10px 12px}
   .analisa-card{padding:16px}
   .analisa-title{font-size:15px}
+  .analisa-header{flex-wrap:wrap;gap:10px}
+  .analisa-header-actions{width:100%;justify-content:flex-end}
+  .analisa-periode-wrap{flex-shrink:0}
+  .analisa-periode-dropdown{right:0;left:auto}
   .kurir-dropdown{right:auto;left:0;min-width:180px}
   .popup-overlay{align-items:flex-end;justify-content:center;padding:0;background:rgba(0,0,0,.35)}
   .popup-box{width:100%;max-width:100%;border-radius:22px 22px 0 0;max-height:90vh;transform:translateY(100%)}
