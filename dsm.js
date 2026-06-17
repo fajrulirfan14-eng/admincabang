@@ -1713,40 +1713,76 @@ async function renderAnalisa() {
   }
 
   function buildHistoryRows(history) {
-    // row 1: header minggu (colspan 4)
-    const mgHeaders = history.map(h => {
-      const isActive = h.minggu === mingguKe;
-      return `<th colspan="4" class="aht-mg-head ${isActive ? "aht-active" : ""}">
-        Mg${h.minggu} · ${h.tgl} ${bulanNama2[selectedBulan]}
-      </th>`;
-    }).join("");
-
-    // row 2: sub header R E P Ket per minggu
-    const subHeaders = history.map(h => {
-      const isActive = h.minggu === mingguKe;
-      const ac = isActive ? "aht-active-col" : "";
-      return `
-        <th class="aht-sub aht-r-label ${ac}">R</th>
-        <th class="aht-sub aht-e-label ${ac}">E</th>
-        <th class="aht-sub aht-p-label ${ac}">P</th>
-        <th class="aht-sub aht-s-label ${ac}">Ket</th>`;
-    }).join("");
-
-    // row 3: nilai
-    const valueCells = history.map(h => {
-      const isActive = h.minggu === mingguKe;
-      const ac = isActive ? "aht-active-col" : "";
-      if (!h.hasData) {
-        return `
-          <td class="aht-empty ${ac}" colspan="4">—</td>`;
+    // kelompokkan history sesuai periode
+    // T-1: setiap minggu sendiri, T-2: pasangan 2 minggu
+    const groups = [];
+    if (selectedPeriode === 1) {
+      history.forEach(h => groups.push([h]));
+    } else {
+      for (let i = 0; i < history.length; i += 2) {
+        groups.push(history.slice(i, i + 2));
       }
-      const sc = h.status ? `aht-status-${h.status.toLowerCase()}` : "";
-      return `
-        <td class="aht-val aht-r ${ac}">${h.r ?? "—"}</td>
-        <td class="aht-val aht-e ${ac}">${h.e ?? "—"}</td>
-        <td class="aht-val aht-p ${ac}">${h.p ?? "—"}</td>
-        <td class="aht-status-cell ${sc} ${ac}">${h.status || "—"}</td>`;
-    }).join("");
+    }
+
+    // hitung persentase per group
+    function calcPersen(grp) {
+      const totalR = grp.reduce((a, h) => a + (h.hasData ? (h.r || 0) : 0), 0);
+      const totalE = grp.reduce((a, h) => a + (h.hasData ? (h.e || 0) : 0), 0);
+      const totalP = grp.reduce((a, h) => a + (h.hasData ? (h.p || 0) : 0), 0);
+      const rp = totalP > 0 ? ((totalR / totalP) * 100).toFixed(1) : 0;
+      const ep = totalP > 0 ? ((totalE / totalP) * 100).toFixed(1) : 0;
+      return { rp: rp + "%", ep: ep + "%" };
+    }
+
+    // ROW 1: header minggu + header persentase
+    let mgHeaders = "";
+    groups.forEach(grp => {
+      grp.forEach(h => {
+        const isActive = h.minggu === mingguKe;
+        mgHeaders += `<th colspan="4" class="aht-mg-head ${isActive ? "aht-active" : ""}">
+          Mg${h.minggu} · ${h.tgl} ${bulanNama2[selectedBulan]}
+        </th>`;
+      });
+      mgHeaders += `<th colspan="2" class="aht-mg-head aht-persen-head">%</th>`;
+    });
+
+    // ROW 2: sub header R E P Ket + R% E%
+    let subHeaders = "";
+    groups.forEach(grp => {
+      grp.forEach(h => {
+        const ac = h.minggu === mingguKe ? "aht-active-col" : "";
+        subHeaders += `
+          <th class="aht-sub aht-r-label ${ac}">R</th>
+          <th class="aht-sub aht-e-label ${ac}">E</th>
+          <th class="aht-sub aht-p-label ${ac}">P</th>
+          <th class="aht-sub aht-s-label ${ac}">Ket</th>`;
+      });
+      subHeaders += `
+        <th class="aht-sub aht-persen-r">R%</th>
+        <th class="aht-sub aht-persen-e">E%</th>`;
+    });
+
+    // ROW 3: nilai + persentase
+    let valueCells = "";
+    groups.forEach(grp => {
+      grp.forEach(h => {
+        const ac  = h.minggu === mingguKe ? "aht-active-col" : "";
+        const sc  = h.status ? `aht-status-${h.status.toLowerCase()}` : "";
+        if (!h.hasData) {
+          valueCells += `<td class="aht-empty ${ac}" colspan="4">—</td>`;
+        } else {
+          valueCells += `
+            <td class="aht-val aht-r ${ac}">${h.r ?? "—"}</td>
+            <td class="aht-val aht-e ${ac}">${h.e ?? "—"}</td>
+            <td class="aht-val aht-p ${ac}">${h.p ?? "—"}</td>
+            <td class="aht-status-cell ${sc} ${ac}">${h.status || "—"}</td>`;
+        }
+      });
+      const { rp, ep } = calcPersen(grp);
+      valueCells += `
+        <td class="aht-val aht-persen-r-val">${rp}</td>
+        <td class="aht-val aht-persen-e-val">${ep}</td>`;
+    });
 
     return `
       <div class="ah-table-wrap">
