@@ -1487,7 +1487,7 @@ function renderRekap(laporanAdmin = {}, dataHarianMap = {}) {
           }, 0);
 
           const persen = totalPay > 0
-            ? ((totalExpired / totalPay) * 100).toFixed(1)
+            ? Math.floor((totalExpired / totalPay) * 100)
             : 0;
 
           return `<td class="rekap-cell rekap-customer">
@@ -1729,16 +1729,16 @@ async function renderAnalisa() {
       const totalR = grp.reduce((a, h) => a + (h.hasData ? (h.r || 0) : 0), 0);
       const totalE = grp.reduce((a, h) => a + (h.hasData ? (h.e || 0) : 0), 0);
       const totalP = grp.reduce((a, h) => a + (h.hasData ? (h.p || 0) : 0), 0);
-      const rp = totalP > 0 ? ((totalR / totalP) * 100).toFixed(1) : 0;
-      const ep = totalP > 0 ? ((totalE / totalP) * 100).toFixed(1) : 0;
+      const rp = totalP > 0 ? Math.floor((totalR / totalP) * 100) : 0;
+      const ep = totalP > 0 ? Math.floor((totalE / totalP) * 100) : 0;
       return { rp: rp + "%", ep: ep + "%" };
     }
     // hitung evaluasi akumulasi semua minggu
     const evalR  = history.reduce((a, h) => a + (h.hasData ? (h.r || 0) : 0), 0);
     const evalE  = history.reduce((a, h) => a + (h.hasData ? (h.e || 0) : 0), 0);
     const evalP  = history.reduce((a, h) => a + (h.hasData ? (h.p || 0) : 0), 0);
-    const evalRp = evalP > 0 ? ((evalR / evalP) * 100).toFixed(1) + "%" : "0%";
-    const evalEp = evalP > 0 ? ((evalE / evalP) * 100).toFixed(1) + "%" : "0%";
+    const evalRp = evalP > 0 ? Math.floor((evalR / evalP) * 100) + "%" : "0%";
+    const evalEp = evalP > 0 ? Math.floor((evalE / evalP) * 100) + "%" : "0%";
     const evalTP = history.filter(h => h.hasData && h.status?.toLowerCase() === "tutup").length;
     const evalPN = history.filter(h => h.hasData && h.status?.toLowerCase() === "pending").length;
 
