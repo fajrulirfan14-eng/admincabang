@@ -381,3 +381,65 @@ body{font-family:"DM Sans",sans-serif;background:linear-gradient(135deg,var(--bg
   .laporan-chip{font-size:11px}
   .laporan-status{font-size:12px}
 }
+
+/* ── LAPORAN HARIAN TABLE ─────────────────── */
+.lh-block{margin-bottom:0;border-bottom:1px solid #E8DED2}
+.lh-block:last-child{border-bottom:none}
+.lh-loading{padding:24px;text-align:center;font-size:13px;color:#9B8E84}
+.lh-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;cursor:grab}
+.lh-tgl-inner{display:flex;flex-direction:column;align-items:center;gap:8px;padding:6px 0}
+.lh-reload-btn{
+  flex-shrink:0;width:24px;height:24px;
+  display:flex;align-items:center;justify-content:center;
+  border:none;background:none;cursor:pointer;
+  color:#C9A67B;transition:.15s;
+}
+.lh-reload-btn svg{width:14px;height:14px;stroke:currentColor}
+.lh-reload-btn:hover{color:#A8845A}
+.lh-reload-btn:disabled{opacity:.6;cursor:not-allowed}
+.lh-reload-btn.spinning svg{animation:lhSpin .7s linear infinite}
+@keyframes lhSpin{to{transform:rotate(360deg)}}
+
+.lh-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid #E8DED2;border-radius:12px;cursor:grab}
+.lh-scroll:active{cursor:grabbing}
+.lh-scroll::-webkit-scrollbar{height:4px}
+.lh-scroll::-webkit-scrollbar-thumb{background:#E8DED2;border-radius:99px}
+
+.lh-table{border-collapse:collapse;width:max-content;min-width:100%;font-size:12px}
+.lh-table th,.lh-table td{padding:5px 12px;border:1px solid #E8DED2;white-space:nowrap;text-align:center}
+
+.lh-th{background:#F8F5F0;font-size:11px;font-weight:700;color:#9B8E84;text-transform:uppercase;letter-spacing:.04em}
+.lh-th-grp{font-weight:800!important}
+.lh-grp-order{background:#EEF4FF!important;color:#4A72C4!important}
+.lh-grp-fee{background:#EEFAF2!important;color:#3A8A5A!important}
+.lh-grp-offFlavor{background:#FFF8EE!important;color:#C47A2A!important}
+.lh-grp-sisaBarang{background:#F4EEFF!important;color:#6A4AC4!important}
+.lh-grp-closing{background:#EEFAFF!important;color:#3A8AAA!important}
+.lh-th-v{font-size:10px!important;color:#B0A090!important}
+.lh-th-bayar,.lh-th-ket{background:#F8F5F0!important;font-weight:800!important}
+.lh-th-nama{text-align:left!important}
+
+.lh-th-tgl{width:28px;min-width:28px;padding:0!important;background:#F8F5F0!important;position:sticky;left:0;z-index:3}
+.lh-td-tgl{width:28px;min-width:28px;padding:4px 2px!important;background:#F8F5F0;position:sticky;left:0;z-index:1;border-right:2px solid #D9CFC6;vertical-align:middle}
+.lh-tgl-text{writing-mode:vertical-lr;transform:rotate(180deg);font-size:10px;font-weight:700;color:#A8845A;white-space:nowrap;line-height:1.2}
+
+.lh-td-nama{text-align:left;font-weight:600;color:#3A312A;position:sticky;left:30px;z-index:1;background:#fff;min-width:100px}
+.lh-th-nama{position:sticky;left:30px;z-index:3;background:#F8F5F0!important;min-width:100px}
+
+.lh-td{color:#3A312A}
+.lh-td-order{background:rgba(74,114,196,.04)}
+.lh-td-fee{background:rgba(58,138,90,.04)}
+.lh-td-offFlavor{background:rgba(196,122,42,.04)}
+.lh-td-sisaBarang{background:rgba(106,74,196,.04)}
+.lh-td-closing{background:rgba(58,138,170,.04)}
+.lh-td-bayar{font-weight:600}
+.lh-ket-kurang{color:#C0534A;font-weight:700}
+.lh-ket-lebih{color:#4E9B63;font-weight:700}
+
+.lh-dummy td{opacity:.35}
+
+.lh-tr-sum td{background:#EDE0CF;font-weight:800;color:#A8845A;border-top:2px solid #C9A67B}
+.lh-sum-label{text-align:left!important;position:sticky;left:0;z-index:1}
+
+.lh-block.lh-kurang{border-left:3px solid #D97B6C;padding-left:8px}
+.lh-empty-cell{padding:24px!important;text-align:center;color:#9B8E84;font-size:13px}

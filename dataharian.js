@@ -2220,120 +2220,207 @@ async function renderLaporanHarian() {
 
   const hariNama = ["Minggu","Senin","Selasa","Rabu","Kamis","Jumat","Sabtu"];
   const totalHari = new Date(selectedYear, selectedMonth + 1, 0).getDate();
-  const tanggalList = [];
-  let html = "";
   const today = getTanggalLocal();
+  const tanggalList = [];
 
-  for (let tanggal = 1; tanggal <= totalHari; tanggal++) {
-    const tanggalDoc = formatTanggalDoc(selectedYear, selectedMonth, tanggal);
-
-    if (laporanFilter === "aktif" && tanggalDoc !== today) continue;
-
-    const date = new Date(selectedYear, selectedMonth, tanggal);
-    const namaHari = hariNama[date.getDay()];
-    tanggalList.push(tanggalDoc);
-
-    html += `
-      <div class="laporan-item">
-        <button class="laporan-trigger" type="button">
-          <div class="laporan-tanggal">${namaHari}, ${tanggal} ${bulanNama[selectedMonth]} ${selectedYear}</div>
-          <div class="laporan-arrow">▶</div>
-        </button>
-        <div class="laporan-content">
-          <div class="laporan-reload-wrap">
-            <button class="laporan-reload-btn" data-tanggal="${tanggalDoc}">Reload</button>
-            <button class="laporan-rekap-btn" data-tanggal="${tanggalDoc}">Rekapitulasi</button>
-          </div>
-          <div class="laporan-placeholder" id="laporan-content-${tanggalDoc}">Loading...</div>
-        </div>
-      </div>`;
+  for (let tgl = 1; tgl <= totalHari; tgl++) {
+    const tDoc = formatTanggalDoc(selectedYear, selectedMonth, tgl);
+    if (laporanFilter === "aktif" && tDoc !== today) continue;
+    const namaHari = hariNama[new Date(selectedYear, selectedMonth, tgl).getDay()];
+    tanggalList.push({ tDoc, tgl, namaHari });
   }
 
-  listEl.innerHTML = html;
+  listEl.innerHTML = tanggalList.map(({ tDoc }) =>
+    `<div class="lh-block" id="lh-block-${tDoc}">
+       <div class="lh-loading">Memuat...</div>
+     </div>`
+  ).join("");
 
-  await Promise.all(
-    tanggalList.map(async tanggalDoc => {
-      try {
-        const laporanData = await loadLaporanAdminTanggal(tanggalDoc, false);
-        const laporanItem = document.getElementById(`laporan-content-${tanggalDoc}`)?.closest(".laporan-item");
-
-        cacheLaporanAdmin[tanggalDoc] = laporanData;
-        renderLaporanCard(tanggalDoc);
-
-        if (!laporanItem) return;
-
-        const users = laporanData
-          ? Object.values(laporanData).filter(item => typeof item === "object" && item?.nama)
-          : [];
-
-        const adaKurang = users.some(item => {
-          const status = item?.pembayaran?.nota?.status;
-          return typeof status === "string" && status.trim().toLowerCase() === "kurang";
-        });
-
-        laporanItem.classList.toggle("laporan-kurang", adaKurang);
-
-        if (laporanFilter === "tunggakan") {
-          laporanItem.style.display = adaKurang ? "" : "none";
-        }
-      } catch (err) {
-        console.error("Gagal render laporan", tanggalDoc, err);
+  for (const { tDoc, tgl, namaHari } of tanggalList) {
+    try {
+      const data = await loadLaporanAdminTanggal(tDoc, false);
+      cacheLaporanAdmin[tDoc] = data;
+      await renderLaporanTable(tDoc, tgl, namaHari);
+      const block = document.getElementById(`lh-block-${tDoc}`);
+      if (!block) continue;
+      const users = data
+        ? Object.values(data).filter(v => typeof v === "object" && v?.nama)
+        : [];
+      const adaKurang = users.some(v =>
+        v?.pembayaran?.nota?.status?.toLowerCase() === "kurang"
+      );
+      block.classList.toggle("lh-kurang", adaKurang);
+      if (laporanFilter === "tunggakan") {
+        block.style.display = adaKurang ? "" : "none";
       }
-    })
-  );
+    } catch (err) {
+      console.error("Gagal render laporan", tDoc, err);
+    }
+  }
 }
-function renderLaporanCard(tanggalDoc) {
-  const el = document.getElementById(`laporan-content-${tanggalDoc}`);
-  if (!el) return;
-  const data = cacheLaporanAdmin[tanggalDoc];
+async function renderLaporanTable(tDoc, tgl, namaHari) {
+  const block = document.getElementById(`lh-block-${tDoc}`);
+  if (!block) return;
 
-  if (data === undefined) { el.innerHTML = "Belum ada data, klik reload"; return; }
-  if (data === null) { el.innerHTML = "Belum ada data"; return; }
+  // ambil varian dari IndexedDB laporanDistribusiDB store users (adminCabang)
+  const varian = await new Promise(resolve => {
+    try {
+      const req = indexedDB.open("laporanDistribusiDB");
+      req.onsuccess = () => {
+        try {
+          const idb = req.result;
+          const tx  = idb.transaction("users", "readonly");
+          const all = tx.objectStore("users").getAll();
+          all.onsuccess = () => {
+            const admin = all.result.find(u =>
+              u.role === "adminCabang" && Array.isArray(u.varian)
+            );
+            if (admin?.varian) {
+              resolve(
+                admin.varian
+                  .filter(v => { const k = Object.keys(v)[0]; return k && v[k]?.isAktif === true; })
+                  .map(v => Object.keys(v)[0])
+              );
+            } else resolve([]);
+          };
+          all.onerror = () => resolve([]);
+        } catch { resolve([]); }
+      };
+      req.onerror = () => resolve([]);
+    } catch { resolve([]); }
+  });
 
-  const users = Object.entries(data).filter(([, val]) => typeof val === "object" && val?.nama);
-  if (!users.length) { el.innerHTML = "Belum ada data"; return; }
+  const data  = cacheLaporanAdmin[tDoc];
+  const users = data
+    ? Object.values(data).filter(v => typeof v === "object" && v?.nama)
+    : [];
+  const isDummy = false;
 
-  function renderMapChip(obj = {}) {
-    const entries = Object.entries(obj);
-    if (!entries.length) return `<span class="laporan-empty">-</span>`;
-    return entries.map(([k, v]) =>
-      `<span class="laporan-chip">${escapeHtml(k)}: ${Number(v).toLocaleString("id-ID")}</span>`
-    ).join("");
-  }
+  const V = varian.length ? varian : ["CB","BB","BK","MC"];
+  const vLen = V.length;
 
-  function renderPembayaran(nota = {}) {
-    const bayar = Number(nota?.bayar || 0);
-    const status = nota?.status || "-";
-    const ket = Number(nota?.keterangan || 0);
-    let cls = "lunas", text = status;
-    if (status === "Kurang") { cls = "kurang"; text = `Kurang -${Math.abs(ket).toLocaleString("id-ID")}`; }
-    else if (status === "Lebih") { cls = "lebih"; text = `Lebih +${Math.abs(ket).toLocaleString("id-ID")}`; }
-    return `
-      <div class="laporan-payment">
-        <div class="laporan-user-line"><span>Pembayaran</span><strong>${bayar.toLocaleString("id-ID")}</strong></div>
-        <div class="laporan-status ${cls}">${text}</div>
-      </div>`;
-  }
+  const tglLabel = `${namaHari}, ${tgl} ${bulanNama[selectedMonth]} ${selectedYear}`;
 
-  const row = (label, chips) => `
-    <div class="laporan-user-row">
-      <span class="laporan-label">${label}</span>
-      <div class="laporan-chip-wrap">${chips}</div>
+  const COLS = [
+    { key: "order",      label: "Order",       src: u => u.order },
+    { key: "fee",        label: "Fee",          src: u => u.fee },
+    { key: "offFlavor",  label: "Off Flavor",   src: u => u.offFlavor },
+    { key: "sisaBarang", label: "Sisa Barang",  src: u => u.sisaBarang },
+    { key: "closing",    label: "Closing",      src: u => u?.pembayaran?.closing },
+  ];
+
+  // ── THEAD ──
+  const th1NoTgl = [
+    `<td rowspan="2" class="lh-th lh-th-nama">Nama</td>`,
+    ...COLS.map(c => `<td colspan="${vLen}" class="lh-th lh-th-grp lh-grp-${c.key}">${c.label}</td>`),
+    `<td rowspan="2" class="lh-th lh-th-bayar">Pembayaran</td>`,
+    `<td rowspan="2" class="lh-th lh-th-ket">Keterangan</td>`,
+  ].join("");
+
+  const th2 = COLS.map(() =>
+    V.map(v => `<td class="lh-th lh-th-v">${v}</td>`).join("")
+  ).join("");
+
+  // ── BODY ──
+  const sums = {};
+  COLS.forEach(c => { sums[c.key] = {}; V.forEach(v => { sums[c.key][v] = 0; }); });
+  let sumBayar = 0;
+
+  const bodyRowsNoTgl = users.map((u, idx) => {
+    const cells = COLS.map(c => {
+      const src = c.src(u) || {};
+      return V.map(v => {
+        const val = Number(src[v] || 0);
+        sums[c.key][v] = (sums[c.key][v] || 0) + val;
+        return `<td class="lh-td lh-td-${c.key}">${val || ""}</td>`;
+      }).join("");
+    }).join("");
+
+    const bayar  = Number(u?.pembayaran?.nota?.bayar || 0);
+    const status = u?.pembayaran?.nota?.status || "-";
+    const ket    = Number(u?.pembayaran?.nota?.keterangan || 0);
+    sumBayar    += bayar;
+
+    let ketHtml = status, ketCls = "";
+    if (status.toLowerCase() === "kurang") {
+      ketHtml = `Kurang ${Math.abs(ket).toLocaleString("id-ID")}`;
+      ketCls  = "lh-ket-kurang";
+    } else if (status.toLowerCase() === "lebih") {
+      ketHtml = `Lebih ${ket.toLocaleString("id-ID")}`;
+      ketCls  = "lh-ket-lebih";
+    }
+
+    return `<tr class="lh-tr${isDummy ? " lh-dummy" : ""}">
+      <td class="lh-td lh-td-nama">${escapeHtml(u.nama)}</td>
+      ${cells}
+      <td class="lh-td lh-td-bayar">${bayar ? bayar.toLocaleString("id-ID") : ""}</td>
+      <td class="lh-td lh-td-ket ${ketCls}">${ketHtml}</td>
+    </tr>`;
+  }).join("");
+
+  // ── SUM ROW ──
+  const sumCells = COLS.map(c =>
+    V.map(v => `<td class="lh-td lh-sum-td lh-td-${c.key}">${sums[c.key][v] || ""}</td>`).join("")
+  ).join("");
+
+  const sumRow = `<tr class="lh-tr-sum">
+    <td class="lh-sum-label">Total</td>
+    ${sumCells}
+    <td class="lh-td lh-sum-td">${sumBayar ? sumBayar.toLocaleString("id-ID") : ""}</td>
+    <td class="lh-td lh-sum-td">—</td>
+  </tr>`;
+
+  // gabungkan tanggal rowspan penuh: header(2) + data + sum
+  const fullRowspan = users.length + 3;
+
+  // kalau kosong, tampilkan baris "belum ada data"
+  const emptyRow = !users.length
+    ? `<tr><td colspan="${2 + COLS.length * vLen + 2}" class="lh-empty-cell">Belum ada data</td></tr>`
+    : "";
+  const tglFullCell = `<td rowspan="${fullRowspan}" class="lh-td-tgl">
+      <div class="lh-tgl-inner">
+        <button class="lh-reload-btn" data-tanggal="${tDoc}" title="Reload">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+        </button>
+        <div class="lh-tgl-text">${tglLabel}</div>
+      </div>
+    </td>`;
+
+  block.innerHTML = `
+    <div class="lh-scroll">
+      <table class="lh-table">
+        <tbody>
+          <tr>${tglFullCell}${th1NoTgl}</tr>
+          <tr>${th2}</tr>
+          ${users.length ? bodyRowsNoTgl + sumRow : emptyRow}
+        </tbody>
+      </table>
     </div>`;
 
-  el.innerHTML = `
-    <div class="laporan-user-scroll">
-      ${users.map(([, item]) => `
-        <div class="laporan-user-card">
-          <div class="laporan-user-name">${escapeHtml(item.nama)}</div>
-          ${row("Order", renderMapChip(item.order))}
-          ${row("Fee", renderMapChip(item.fee))}
-          ${row("Off Flavor", renderMapChip(item.offFlavor))}
-          ${row("Sisa Barang", renderMapChip(item.sisaBarang))}
-          ${row("Closing", renderMapChip(item?.pembayaran?.closing))}
-          ${renderPembayaran(item?.pembayaran?.nota)}
-        </div>`).join("")}
-    </div>`;
+  // event reload
+  block.querySelector(".lh-reload-btn")?.addEventListener("click", async e => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    btn.classList.add("spinning");
+    // fetch dulu sambil animasi muter
+    const d = await loadLaporanAdminTanggal(tDoc, true);
+    cacheLaporanAdmin[tDoc] = d;
+    // beri waktu animasi terlihat minimal 1 putaran
+    await new Promise(r => setTimeout(r, 500));
+    await renderLaporanTable(tDoc, tgl, namaHari);
+  });
+
+  // drag scroll
+  const scroll = block.querySelector(".lh-scroll");
+  if (scroll) {
+    let dn = false, sx = 0, sl = 0;
+    scroll.addEventListener("mousedown", e => { dn=true; sx=e.pageX-scroll.offsetLeft; sl=scroll.scrollLeft; scroll.style.cursor="grabbing"; });
+    document.addEventListener("mouseup", () => { dn=false; scroll.style.cursor=""; });
+    document.addEventListener("mousemove", e => { if(!dn) return; scroll.scrollLeft = sl-(e.pageX-scroll.offsetLeft-sx); });
+    let tx=0, tl=0;
+    scroll.addEventListener("touchstart", e => { tx=e.touches[0].pageX; tl=scroll.scrollLeft; }, {passive:true});
+    scroll.addEventListener("touchmove",  e => { scroll.scrollLeft = tl-(e.touches[0].pageX-tx); }, {passive:true});
+  }
 }
 function buildRekapitulasi(tanggalDoc) {
   const data = cacheLaporanAdmin[tanggalDoc];
