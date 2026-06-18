@@ -574,9 +574,7 @@ async function renderNonAktifAside() {
         const namaPemilik = pemilikUser?.nama || "-";
         const nama        = c.namaCustomer || "-";
         const inisial     = nama.charAt(0).toUpperCase();
-        const avatarHtml  = c.foto
-          ? `<img class="nonaktif-foto" src="${c.foto}" alt="${nama}">`
-          : `<div class="nonaktif-foto nonaktif-foto-empty">${inisial}</div>`;
+        const avatarHtml = `<div class="nonaktif-foto nonaktif-foto-empty">${inisial}</div>`;
 
         const toDate = (val) => {
           if (!val) return null;
@@ -2321,17 +2319,27 @@ function openHapusPermanen(customer) {
       }
 
       await setDoc(fsDoc(db, "customerNonAktif", customer.id), {
-        namaCustomer:    customer.namaCustomer    || "",
-        idCabang:        customer.idCabang        || "",
-        createdBy:       customer.createdBy       || "",
-        pemilik:         customer.pemilik         || "",
-        createdAt:       createdAtVal,
-        foto:            customer.foto            || "",
-        lokasiCustomer:  customer.lokasiCustomer  || null,
-        hari:            customer.hari            || "",
-        nonAktifAt:      { seconds: Math.floor(Date.now() / 1000), nanoseconds: 0 },
+        namaCustomer:   customer.namaCustomer   || "",
+        idCabang:       customer.idCabang       || "",
+        createdBy:      customer.createdBy      || "",
+        pemilik:        customer.pemilik        || "",
+        createdAt:      createdAtVal,
+        lokasiCustomer: customer.lokasiCustomer || null,
+        hari:           customer.hari           || "",
+        nonAktifAt:     { seconds: Math.floor(Date.now() / 1000), nanoseconds: 0 },
       });
-
+      // 2. Hapus foto dari Firebase Storage kalau ada
+      if (customer.foto) {
+        try {
+          const { ref: storageRef, deleteObject } =
+            await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js");
+          const fotoRef = storageRef(storage, `fotoCustomer/${customer.id}`);
+          await deleteObject(fotoRef);
+          console.log("✅ Foto dihapus dari Storage");
+        } catch (_) {
+          // tidak masalah kalau foto tidak ada
+        }
+      }
       // 2. Hapus subcollection dataHarian kalau ada
       try {
         const subSnap = await fsGetDocs(fsCol(db, "customer", customer.id, "dataHarian"));
