@@ -749,10 +749,11 @@ function renderTable() {
     const statusKet  = harianDoc_?.keterangan?.status?.toLowerCase() || "";
     const badgeMap   = { tutup: "TP", pending: "PN", putus: "PT" };
     const badgeLabel = badgeMap[statusKet] || "";
+    const fotoKeterangan = harianDoc_?.keterangan?.foto || customer?.foto || "";
     const badgeHtml  = badgeLabel
       ? `<span class="status-badge status-badge-${statusKet}"
            data-customer-id="${d.customerId}"
-           data-foto="${esc(customer?.foto || "")}"
+           data-foto="${esc(fotoKeterangan)}"
            data-nama="${esc(namaCustomer)}"
          >${badgeLabel}</span>`
       : "";
