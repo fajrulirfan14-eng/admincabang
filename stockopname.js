@@ -12,7 +12,6 @@ let saldoKemarinGlobal = {};
 
 onAuthStateChanged(auth, async (user) => {
   if (!user) { console.log("Belum login"); return; }
-  console.log("Login:", user.uid);
   currentUid = user.uid;
 
   const now = new Date();
@@ -91,7 +90,6 @@ function initCalendar() {
     selectedDate = new Date(e.target.value);
     _setDate(selectedDate);
     renderCalendar(selectedDate);
-    console.log("Tanggal:", e.target.value);
     await renderTableFromDB();
     await renderSaldoBulanKemarinData();
   });
@@ -122,7 +120,6 @@ function initCalendar() {
         dateInput.value = tanggal;
         currentDate     = tanggal;
         renderCalendar(selectedDate);
-        console.log("Tanggal:", tanggal);
         await renderTableFromDB();
         await renderSaldoBulanKemarinData();
       });
@@ -190,14 +187,7 @@ async function loadVarian() {
     }
 
     const varian = snap.data()?.varian || [];
-    console.log("📦 Raw varian:", JSON.stringify(varian));
-
     varianKeys = varian.map(v => Object.keys(v)[0]).filter(Boolean);
-    console.log("🏷️ Varian keys:", varianKeys);
-    
-    // render saldo dinamis
-    renderSaldoBulanKemarin(varianKeys);
-    
     renderTableHeader(varianKeys);
     await renderTableFromDB();
     await renderSaldoBulanKemarinData();
@@ -514,21 +504,14 @@ function openRincianDB() {
 
         if (!dbUp.objectStoreNames.contains("laporanAdmin")) {
           dbUp.createObjectStore("laporanAdmin", { keyPath: "tanggal" });
-          console.log("🗄️ Store laporanAdmin dibuat");
         }
 
         if (!dbUp.objectStoreNames.contains("users")) {
           dbUp.createObjectStore("users", { keyPath: "uid" });
-          console.log("🗄️ Store users dibuat");
         }
         if (!dbUp.objectStoreNames.contains("saldoBulanKemarin")) {
           dbUp.createObjectStore("saldoBulanKemarin", { keyPath: "bulan" });
-          console.log("🗄️ Store saldoBulanKemarin dibuat");
         }
-        if (!dbUp.objectStoreNames.contains("laporanAdmin")) {
-          dbUp.createObjectStore("laporanAdmin", { keyPath: "tanggal" });
-          console.log("🗄️ Store laporanAdmin dibuat");
-        }     
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror   = () => reject(req.error);
@@ -547,7 +530,7 @@ async function saveUsersToDB(docs) {
   const tx    = dbConn.transaction("users", "readwrite");
   const store = tx.objectStore("users");
 
-  docs.forEach(d => store.put({ tanggal: d.id, ...d.data() }));
+  docs.forEach(d => store.put({ uid: d.id, ...d.data() }));
 
   return new Promise((resolve, reject) => {
     tx.oncomplete = () => resolve();
@@ -557,14 +540,11 @@ async function saveUsersToDB(docs) {
 async function debugRincianDB() {
   try {
     const dbConn = await openRincianDB();
-    if (!dbConn.objectStoreNames.contains(DB_STORE)) { console.warn("⚠️ Store belum ada"); return; }
+    if (!dbConn.objectStoreNames.contains(DB_STORE)) { }
     const tx  = dbConn.transaction(DB_STORE, "readonly");
     const req = tx.objectStore(DB_STORE).getAll();
     req.onsuccess = () => {
       const data = req.result || [];
-      console.log("📦 rincianPengeluaranDB:", data.length, "record");
-      console.table(data);
-      data.forEach((item, i) => console.log(`📄 Record ${i + 1}:`, JSON.parse(JSON.stringify(item))));
     };
     req.onerror = () => console.error("❌ Gagal baca:", req.error);
   } catch (err) {
@@ -642,9 +622,6 @@ function setupReloadBtn() {
 
     try {
       const tanggal = currentDate;
-      console.log("🔄 Query Firestore tanggal:", tanggal);
-
-      // 1. getDoc langsung per tanggal — lebih efisien dari query
       const { doc: fsDoc, getDoc } = await import(
         "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js"
       );
@@ -678,11 +655,7 @@ function setupReloadBtn() {
           };
           getReq.onerror = () => reject(getReq.error);
         });
-
-        console.log("✅ laporanAdmin tersimpan:", tanggal);
-      } else {
-        console.warn("⚠️ Tidak ada data untuk tanggal:", tanggal);
-      }
+      } else {  }
 
       // 2. Query users createdBy == currentUid
       const qUsers        = query(
@@ -693,7 +666,6 @@ function setupReloadBtn() {
 
       if (!snapshotUsers.empty) {
         await saveUsersToDB(snapshotUsers.docs);
-        console.log("✅ users tersimpan ke IndexedDB");
       }
 
       await renderTableFromDB();
@@ -1067,7 +1039,10 @@ function renderTableBody(dataList, keys, dateFrom = null, dateTo = null) {
     startDate = new Date(yr, mo - 1, 1);
     endDate   = new Date(yr, mo, 0);
   }
-
+  const fullSortedData = [...dataList].sort((a, b) =>
+    (a.tanggal || a.id).localeCompare(b.tanggal || b.id)
+  );
+  const saldoMap = hitungSaldoBerantai(fullSortedData, keys, saldoKemarinGlobal);
   for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
     const yyyy   = d.getFullYear();
     const mm     = String(d.getMonth() + 1).padStart(2, "0");
@@ -1174,11 +1149,6 @@ function renderTableBody(dataList, keys, dateFrom = null, dateTo = null) {
     keys.forEach(k =>
       tr.innerHTML += `<td class="col-hilang">${v(stock.barangHilang?.[k])}</td>`
     );
-    const fullSortedData = [...dataList].sort((a, b) =>
-      (a.tanggal || a.id).localeCompare(b.tanggal || b.id)
-    );
-    const saldoMap = hitungSaldoBerantai(fullSortedData, keys, saldoKemarinGlobal);
-    
     const saldoHariIni = saldoMap[tglKey] || {};
     
     keys.forEach(k =>
@@ -1388,7 +1358,6 @@ async function renderPopupStockForm(mode = "main") {
     if (idCabang) {
       const cabangSnap = await getDoc(doc(db, "kantorCabang", idCabang));
       expiredDays = Number(cabangSnap.data()?.target?.expired) || 0;
-      console.log("🎯 expiredDays:", expiredDays);
     }
 
     const snap = await gd(q(col(db, "users"), w("createdBy", "==", adminCabangUid), w("role", "==", "produksi")));
@@ -1428,9 +1397,6 @@ async function renderPopupStockForm(mode = "main") {
 
   const existing    = existingData?.stockOpname || {};
   const expiredDate = getExpiredDate(currentDate, expiredDays);
-
-  console.log("📋 Existing stock opname:", existing);
-
   // update date text di header popup
   const popupDateText = document.getElementById("popupStockDateText");
   if (popupDateText) popupDateText.textContent = formatTanggalIndonesia(currentDate);
@@ -1533,12 +1499,14 @@ async function renderPopupStockForm(mode = "main") {
     });
   });
 
-  document.addEventListener("click", (e) => {
+  const closeKokiMenu = (e) => {
     if (!kokiBtn?.contains(e.target) && !kokiMenu?.contains(e.target)) {
       kokiMenu.classList.remove("show");
-      kokiBtn.classList.remove("active");
+      kokiBtn?.classList.remove("active");
+      document.removeEventListener("click", closeKokiMenu);
     }
-  });
+  };
+  document.addEventListener("click", closeKokiMenu);
 
   // ── SAVE BUTTON ──────────────────────────────
   const saveBtn = document.getElementById("popupStockSaveBtn");
@@ -1598,7 +1566,6 @@ async function renderPopupStockForm(mode = "main") {
         if (Object.keys(promosi).length) stockOpname.promosi = promosi;  
         if (Object.keys(barangHilang).length) stockOpname.barangHilang = barangHilang;  
       }
-      console.log("📦 Stock opname payload:", JSON.stringify(stockOpname));
       const { doc, setDoc, serverTimestamp } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
 
       await setDoc(doc(db, "users", currentUid, "laporanAdmin", currentDate), {
@@ -1607,9 +1574,6 @@ async function renderPopupStockForm(mode = "main") {
         updatedAt: serverTimestamp(),
         stockOpname
       }, { merge: true });
-
-      console.log("✅ Firestore tersimpan:", currentDate);
-
       // Simpan ke IndexedDB — merge dengan data existing
       const dbConn = await openRincianDB();
       const tx     = dbConn.transaction(DB_STORE, "readwrite");
@@ -1635,8 +1599,6 @@ async function renderPopupStockForm(mode = "main") {
         };
         getReq.onerror = () => reject(getReq.error);
       });
-
-      console.log("✅ IndexedDB tersimpan:", currentDate);
       await renderTableFromDB();
 
       saveBtn.classList.remove("loading");
