@@ -1046,9 +1046,17 @@ async function loadKurir() {
         nama: data.nama || "Tanpa Nama",
         role: data.role || "kurir"
       };      
+      const hasCatatan = !!(data.catatan?.body?.trim());
+
       const avatarHtml = foto
         ? `<img class="avatar-img" src="${escapeHtml(foto)}" data-inisial="${escapeHtml(inisial)}" alt="${nama}">`
         : `<span class="avatar-text">${escapeHtml(inisial)}</span>`;
+      const avatarWrap = `
+        <div class="avatar-wrap">
+          ${avatarHtml}
+          ${hasCatatan ? `<span class="kurir-catatan-dot"></span>` : ""}
+        </div>`;
+
       const actionBtn = (type, label, svg) => `
         <div class="kurir-action">
           <button class="action-btn popup-btn"
@@ -1062,13 +1070,14 @@ async function loadKurir() {
       
           <div class="action-tooltip">${label}</div>
         </div>`;
+
         html += `
           <div class="kurir-card kurir-open-popup"
             data-nama="${nama}"
             data-role="${role}"
             data-uid="${uidMarketing}">
             
-            <div class="avatar">${avatarHtml}</div>
+            <div class="avatar">${avatarWrap}</div>
         
             <div class="kurir-info">
               <h3>${nama}</h3>
