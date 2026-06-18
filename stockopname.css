@@ -188,11 +188,10 @@ body {
 }
 
 .content-wrap {
-  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  gap: 16px;
   min-height: 0;
-  flex: 0 0 130%;
-  display: flex;
-  gap: 24px;
   align-items: stretch;
 }
 
@@ -717,11 +716,11 @@ tfoot .col-saldo {
 }
 
 .content-right {
-  width: 320px;
-  flex-shrink: 0;
-  position: sticky;
-  top: 24px;
+  width: 100%;
   display: flex;
+  flex-direction: column;
+  gap: 16px;
+  align-self: stretch;
 }
 
 .header-filter {
@@ -1104,6 +1103,7 @@ body.popup-dragging * {
 }
 
 .analisa-card {
+  flex: 1;
   padding: 16px;
   border-radius: 22px;
   background: var(--analisa-card-bg);
@@ -1254,8 +1254,8 @@ body.popup-dragging * {
 .analisa-chart-wrap {
   grid-column: 1 / -1;
   position: relative;
-  height: 310px;
-  margin-top: -50px;
+  height: 300px;
+  margin-top: -20px;
   padding: 0;
   display: flex;
   align-items: center;
@@ -1264,7 +1264,7 @@ body.popup-dragging * {
 
 #analisaChart {
   width: 160px !important;
-  height: 160px !important;
+  height: 180px !important;
 }
 
 .chart-center-text {
@@ -1346,23 +1346,47 @@ body.popup-dragging * {
   }
 
   .content-wrap {
-    flex: none !important;
+    display: flex !important;
+    flex-direction: row;
+    gap: 0;
     width: 100%;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
+    overflow-x: scroll;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
     align-items: stretch;
   }
 
-  .content-left,
-  .content-right {
+  .content-wrap::-webkit-scrollbar {
+    display: none;
+  }
+
+  .content-left {
+    flex: 0 0 100%;
     width: 100%;
-    min-width: 0;
+    min-width: 100%;
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
     position: static !important;
+    padding-right: 8px;
   }
 
   .content-right {
-    order: -1;
+    flex: 0 0 100%;
+    width: 100%;
+    min-width: 100%;
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
+    position: static !important;
+    max-height: none;
+    flex-direction: column;
+    padding-left: 8px;
+    align-self: stretch;
+  }
+
+  .analisa-card {
+    flex: 1;
+    overflow-y: visible;
   }
 
   .users-card,
@@ -1420,7 +1444,7 @@ body.popup-dragging * {
   .laporan-table-scroll {
     overflow-x: auto !important;
     overflow-y: auto !important;
-    max-height: 65vh;
+    height: calc(100vh - 280px);
     border-radius: 18px;
     -webkit-overflow-scrolling: touch;
   }
@@ -1448,7 +1472,7 @@ body.popup-dragging * {
 
   .analisa-body {
     grid-template-columns: 1fr;
-    gap: 8px;
+    gap: 5px;
   }
 
   .analisa-item {
@@ -1461,13 +1485,13 @@ body.popup-dragging * {
   }
 
   .analisa-chart-wrap {
-    height: 240px;
+    height: 350px;
     margin-top: -20px;
   }
 
   #analisaChart {
-    width: 135px !important;
-    height: 135px !important;
+    width: 235px !important;
+    height: 235px !important;
   }
 
   .chart-center-text b {
