@@ -791,7 +791,7 @@ async function renderDefaultAside(){
     body.innerHTML = `
       <div class="aside-placeholder">
         <img
-          src="./logoTTN.png"
+          src="./LogoTTN.png"
           alt="Logo"
           class="aside-logo"
         />
