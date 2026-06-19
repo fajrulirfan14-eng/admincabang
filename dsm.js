@@ -25,6 +25,7 @@ let selectedTahun   = new Date().getFullYear();
 let mingguKe        = 1;
 let totalMinggu     = 1;
 let selectedTanggal = null;
+let analisaFilter = new Set();
 
 const DSM_STATE_KEY = "dsmPageState";
 
@@ -1143,6 +1144,31 @@ function initEvents() {
       document.getElementById("analisaPeriodeWrap")?.classList.remove("open");
     }
   });
+  document.querySelector(".at-filter-wrap")?.addEventListener("click", async e => {
+    const chip = e.target.closest(".at-filter-chip");
+    if (!chip) return;
+    const f = chip.dataset.filter;
+
+    if (f === "default") {
+      analisaFilter.clear();
+      document.querySelectorAll(".at-filter-chip").forEach(c => c.classList.remove("at-filter-active"));
+      chip.classList.add("at-filter-active");
+    } else {
+      document.querySelector('.at-filter-chip[data-filter="default"]')?.classList.remove("at-filter-active");
+      if (analisaFilter.has(f)) {
+        analisaFilter.delete(f);
+        chip.classList.remove("at-filter-active");
+      } else {
+        analisaFilter.add(f);
+        chip.classList.add("at-filter-active");
+      }
+      if (analisaFilter.size === 0) {
+        analisaFilter.clear();
+        document.querySelector('.at-filter-chip[data-filter="default"]')?.classList.add("at-filter-active");
+      }
+    }
+    await renderAnalisa();
+  });
   document.getElementById("btnExport")?.addEventListener("click", exportExcel);
   document.getElementById("searchInput")?.addEventListener("input", () => applyFilter());
   document.getElementById("btnSimpan")?.addEventListener("click", simpanData);
@@ -1901,7 +1927,18 @@ async function renderAnalisa() {
     }
   });
 
-  const semuaTanggal = hitungMingguDalamBulan(selectedHari, selectedBulan, selectedTahun).slice(0, mingguKe);
+  const allTanggal = hitungMingguDalamBulan(selectedHari, selectedBulan, selectedTahun).slice(0, mingguKe);
+
+  // kelompokkan sesuai periode
+  const semuaTanggalGroups = [];
+  if (selectedPeriode === 1) {
+    allTanggal.forEach(d => semuaTanggalGroups.push([d]));
+  } else {
+    for (let i = 0; i < allTanggal.length; i += 2) {
+      semuaTanggalGroups.push(allTanggal.slice(i, i + 2));
+    }
+  }
+  const semuaTanggal = allTanggal; // tetap pakai untuk fetch data
   const dataHarianPerTanggal = {};
   for (const d of semuaTanggal) {
     const tStr  = formatTanggal(d);
@@ -1925,10 +1962,21 @@ async function renderAnalisa() {
       const cl = harianDoc ? Object.values(harianDoc.closing || {}).reduce((a,v) => a+(Number(v)||0), 0) : null;
       return { minggu: idx+1, tgl: d.getDate(), r, e, p, cl, status: harianDoc?.keterangan?.status || null, hasData: !!harianDoc };
     });
+    // cek status minggu aktif
+    const statusMingguAktif = history.find(h => h.minggu === mingguKe)?.status?.toLowerCase() || "";
+    const isTutupOrPending  = statusMingguAktif === "tutup" || statusMingguAktif === "pending";
+
+    let statusTrikotomi = dsm ? triKlasifikasi(retTotal, expTotal, tri) : "grey";
+
+    // override: tutup/pending → stabil (kuning)
+    if (isTutupOrPending && statusTrikotomi !== "red") {
+      statusTrikotomi = "yellow";
+    }
+
     return {
-      nama: c.namaCustomer || "-", customerId: cid,
-      status: dsm ? triKlasifikasi(retTotal, expTotal, tri) : "grey",
-      evaluasi: c.evaluasi || null, history
+      nama:       c.namaCustomer || "-", customerId: cid,
+      status:     statusTrikotomi,
+      evaluasi:   c.evaluasi || null, history
     };
   });
 
@@ -1948,19 +1996,23 @@ async function renderAnalisa() {
   // ── BUILD TABEL TUNGGAL ──
   // thead baris 1: Customer + per minggu (colspan 4) + % (colspan 3) + Evaluasi (colspan 8) + Status
   let th1 = `<th rowspan="2" class="at-th at-no">No.</th><th rowspan="2" class="at-th at-nama">Customer</th>`;
-  semuaTanggal.forEach((d, i) => {
-    const mc = `at-mg-${(i % 5) + 1}`;
-    const isActive = (i + 1) === mingguKe;
-    th1 += `<th colspan="4" class="at-th ${mc} ${isActive ? "at-active-head" : ""}">Mg${i+1} · ${d.getDate()} ${bulanNama[d.getMonth()]}</th>`;
+  semuaTanggalGroups.forEach((grp, gi) => {
+    const mc       = `at-mg-${(gi % 5) + 1}`;
+    const isActive = grp.some((d, i) => allTanggal.indexOf(d) + 1 === mingguKe);
+    const idxFirst = gi * (selectedPeriode === 2 ? 2 : 1);
+    const idxLast  = idxFirst + grp.length - 1;
+    const label    = grp.length === 1
+      ? `Mg${idxFirst + 1} · ${grp[0].getDate()} ${bulanNama[grp[0].getMonth()]}`
+      : `Mg${idxFirst + 1}-${idxLast + 1} · ${grp[0].getDate()}-${grp[grp.length-1].getDate()} ${bulanNama[grp[0].getMonth()]}`;
+    th1 += `<th colspan="4" class="at-th ${mc} ${isActive ? "at-active-head" : ""}">${label}</th>`;
     th1 += `<th colspan="3" class="at-th ${mc} at-persen-head">%</th>`;
   });
   th1 += `<th colspan="8" class="at-th at-eval-head">Evaluasi</th>`;
   th1 += `<th rowspan="2" class="at-th at-status-head">Status</th>`;
 
-  // thead baris 2: sub kolom
   let th2 = "";
-  semuaTanggal.forEach((d, i) => {
-    const sc = `at-sub-${(i % 5) + 1}`;
+  semuaTanggalGroups.forEach((grp, gi) => {
+    const sc = `at-sub-${(gi % 5) + 1}`;
     th2 += `<th class="at-sub ${sc}">Return</th><th class="at-sub ${sc}">Expired</th><th class="at-sub ${sc}">Pay</th><th class="at-sub ${sc}">Ket</th>`;
     th2 += `<th class="at-sub ${sc} at-persen">R%</th><th class="at-sub ${sc} at-persen">E%</th><th class="at-sub ${sc} at-persen">P%</th>`;
   });
@@ -1970,7 +2022,18 @@ async function renderAnalisa() {
 
   // tbody rows
   const statusOrder = ["green","yellow","red","grey"];
-  const sortedResult = [...result].sort((a,b) => statusOrder.indexOf(a.status) - statusOrder.indexOf(b.status));
+  let sortedResult = [...result].sort((a,b) => statusOrder.indexOf(a.status) - statusOrder.indexOf(b.status));
+
+  // terapkan filter
+  if (analisaFilter.size > 0) {
+    sortedResult = sortedResult.filter(c => {
+      if (analisaFilter.has("return")  && c.history.some(h => h.hasData && (h.r || 0) > 0)) return true;
+      if (analisaFilter.has("expired") && c.history.some(h => h.hasData && (h.e || 0) > 0)) return true;
+      if (analisaFilter.has("tutup")   && c.history.some(h => h.hasData && h.status?.toLowerCase() === "tutup")) return true;
+      if (analisaFilter.has("pending") && c.history.some(h => h.hasData && h.status?.toLowerCase() === "pending")) return true;
+      return false;
+    });
+  }
 
   const rows = sortedResult.map(c => {
     const evalR  = c.history.reduce((a,h) => a + (h.hasData ? (h.r  || 0) : 0), 0);
@@ -1990,28 +2053,40 @@ async function renderAnalisa() {
     const rowNo = sortedResult.indexOf(c) + 1;
     let cells = `<td class="at-td at-no-cell">${rowNo}</td><td class="at-td at-nama-cell ${bgCls}">${esc(c.nama)}</td>`;
 
-    // per minggu
-    let prevP = 0, prevCl = 0;
-    c.history.forEach((h, i) => {
-      const isActive = h.minggu === mingguKe;
-      const ac = isActive ? "at-active" : "";
-      const grp = selectedPeriode === 2 && i % 2 === 1 ? [c.history[i-1], h] : [h];
-      const totalR  = grp.reduce((a,g) => a + (g.hasData ? (g.r  || 0) : 0), 0);
-      const totalE  = grp.reduce((a,g) => a + (g.hasData ? (g.e  || 0) : 0), 0);
-      const totalP  = grp.reduce((a,g) => a + (g.hasData ? (g.p  || 0) : 0), 0);
-      const totalCl = grp.reduce((a,g) => a + (g.hasData ? (g.cl || 0) : 0), 0);
+    // per group minggu
+    semuaTanggalGroups.forEach((grp, gi) => {
+      const isActive = grp.some(d => allTanggal.indexOf(d) + 1 === mingguKe);
+      const ac       = isActive ? "at-active" : "";
+      const mc       = `at-mg-${(gi % 5) + 1}`;
+
+      // ambil history untuk semua tanggal di group ini
+      const hDocs = grp.map(d => {
+        const tStr = formatTanggal(d);
+        return dataHarianPerTanggal[tStr]?.[c.customerId] || null;
+      });
+
+      const totalR  = hDocs.reduce((a, h) => a + (h ? Object.values(h.return  || {}).reduce((x,v) => x+(Number(v)||0), 0) : 0), 0);
+      const totalE  = hDocs.reduce((a, h) => a + (h ? Object.values(h.expired || {}).reduce((x,v) => x+(Number(v)||0), 0) : 0), 0);
+      const totalP  = hDocs.reduce((a, h) => a + (h ? Object.values(h.pay     || {}).reduce((x,v) => x+(Number(v)||0), 0) : 0), 0);
+      const totalCl = hDocs.reduce((a, h) => a + (h ? Object.values(h.closing || {}).reduce((x,v) => x+(Number(v)||0), 0) : 0), 0);
+      const hasData = hDocs.some(h => h !== null);
+
+      // status: ambil dari tanggal terakhir di group
+      const lastH  = hDocs[hDocs.length - 1];
+      const status = lastH?.keterangan?.status || null;
+      const stc    = status ? `at-ket-${status.toLowerCase()}` : "";
+
       const rp = totalP  > 0 ? Math.floor((totalR/totalP)*100)  + "%" : "—";
       const ep = totalP  > 0 ? Math.floor((totalE/totalP)*100)  + "%" : "—";
       const pp = totalCl > 0 ? Math.floor((totalP/totalCl)*100) + "%" : "—";
-      const stc = h.status ? `at-ket-${h.status.toLowerCase()}` : "";
 
-      if (!h.hasData) {
-        cells += `<td class="at-td ${ac}" colspan="4">—</td>`;
+      if (!hasData) {
+        cells += `<td class="at-td ${ac} ${mc}" colspan="4">—</td>`;
       } else {
-        cells += `<td class="at-td ${ac}">${h.r ?? "—"}</td>`;
-        cells += `<td class="at-td ${ac}">${h.e ?? "—"}</td>`;
-        cells += `<td class="at-td ${ac}">${h.p ?? "—"}</td>`;
-        cells += `<td class="at-td ${ac} ${stc}">${h.status || "—"}</td>`;
+        cells += `<td class="at-td ${ac} ${mc}">${totalR || "—"}</td>`;
+        cells += `<td class="at-td ${ac} ${mc}">${totalE || "—"}</td>`;
+        cells += `<td class="at-td ${ac} ${mc}">${totalP || "—"}</td>`;
+        cells += `<td class="at-td ${ac} ${mc} ${stc}">${status || "—"}</td>`;
       }
       cells += `<td class="at-td at-persen-val ${ac}">${rp}</td>`;
       cells += `<td class="at-td at-persen-val ${ac}">${ep}</td>`;

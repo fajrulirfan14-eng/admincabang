@@ -305,6 +305,7 @@ tbody tr:hover td.td-nama{background:var(--bg)}
 .at-table{border-collapse:collapse;min-width:max-content;width:100%}
 .at-th{
   padding:8px 10px;
+  height:41px;
   font-size:11px;
   font-weight:700;
   text-align:center;
@@ -332,7 +333,7 @@ tbody tr:hover td.td-nama{background:var(--bg)}
   white-space:nowrap;
   border:1px solid var(--border);
   position:sticky;
-  top:33px;
+  top:37px;
   z-index:9;
   color:var(--text-muted);
 }
@@ -404,6 +405,38 @@ tr.at-bg-red-row td{background:#fdf0f1 !important}
   text-align:center;
   margin-top:3px;
   white-space:nowrap;
+}
+.at-filter-wrap{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  background:var(--bg);
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:4px 8px;
+}
+.at-filter-chip{
+  height:28px;
+  padding:0 10px;
+  border-radius:8px;
+  border:none;
+  background:transparent;
+  font-family:inherit;
+  font-size:12px;
+  font-weight:500;
+  color:var(--text-muted);
+  cursor:pointer;
+  transition:.15s;
+  white-space:nowrap;
+}
+.at-filter-chip:hover{
+  background:var(--primary-light);
+  color:var(--primary-dark);
+}
+.at-filter-chip.at-filter-active{
+  background:var(--primary);
+  color:#fff;
+  font-weight:700;
 }
 
 /* warna per minggu */
