@@ -1155,6 +1155,21 @@ async function loadKurir() {
     listEl.innerHTML = `<div class="loading-card">Gagal memuat data</div>`;
   }
 }
+function setupEnterNavigation(form) {
+  const inputs = Array.from(form.querySelectorAll("input"));
+  inputs.forEach((input, i) => {
+    input.addEventListener("keydown", e => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      const next = inputs[i + 1];
+      if (next) {
+        next.focus();
+      } else {
+        form.querySelector(".popup-save-btn")?.focus();
+      }
+    });
+  });
+}
 async function buildPopupForm(type, nama, uidMarketing) {
   const varian = await loadVarian();
   const isPembayaran = type === "pembayaran";
@@ -2676,6 +2691,7 @@ document.addEventListener("click", async e => {
     if (form) {
       await loadPopupPreview(form);
       await calculatePembayaran(form);
+      setupEnterNavigation(form);
     }
   }
 });
