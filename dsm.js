@@ -949,23 +949,38 @@ function openPopupCatatan(customerId, pesanAwal = "") {
   overlay.classList.add("show");
   setTimeout(() => input.focus(), 200);
 }
-function openPopupFoto(foto, nama) {
+function openPopupFoto(foto, nama, fotoCustomer = "") {
   const overlay = document.getElementById("fotoOverlay");
-  const img     = document.getElementById("fotoPreviewImg");
-  const label   = document.getElementById("fotoPreviewNama");
   if (!overlay) return;
 
-  const noImg = document.getElementById("fotoNoImg");
-  if (foto) {
-    img.src           = foto;
-    img.style.display = "block";
-    if (noImg) noImg.style.display = "none";
-  } else {
-    img.src           = "";
-    img.style.display = "none";
-    if (noImg) noImg.style.display = "flex";
-  }
+  const body = overlay.querySelector(".popup-body");
+  if (!body) return;
+
+  const renderFotoBox = (src, label) => `
+    <div class="foto-box">
+      <div class="foto-box-label">${label}</div>
+      ${src
+        ? `<img src="${src}" class="foto-box-img" alt="${label}">`
+        : `<div class="foto-no-img">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2"/>
+              <circle cx="8.5" cy="8.5" r="1.5"/>
+              <polyline points="21 15 16 10 5 21"/>
+            </svg>
+            <span>Tidak ada foto</span>
+          </div>`
+      }
+    </div>`;
+
+  body.innerHTML = `
+    <div class="foto-compare-wrap">
+      ${renderFotoBox(fotoCustomer, "Foto Customer")}
+      ${renderFotoBox(foto, "Foto Keterangan")}
+    </div>`;
+
+  const label = document.getElementById("fotoPreviewNama");
   if (label) label.textContent = nama || "—";
+
   overlay.classList.add("show");
 }
 function openPopup(id)  { document.getElementById(id)?.classList.add("show"); }
@@ -1193,9 +1208,12 @@ function initEvents() {
   document.getElementById("dsmTableBody")?.addEventListener("click", e => {
     const badge = e.target.closest(".status-badge");
     if (!badge) return;
-    const foto = badge.dataset.foto;
-    const nama = badge.dataset.nama;
-    openPopupFoto(foto, nama);
+    const foto         = badge.dataset.foto;
+    const nama         = badge.dataset.nama;
+    const customerId   = badge.dataset.customerId;
+    const customer     = customerList.find(c => (c.id || c.uid) === customerId);
+    const fotoCustomer = customer?.foto || "";
+    openPopupFoto(foto, nama, fotoCustomer);
   });
   // Delegasi: reload per baris
   document.getElementById("dsmTableBody")?.addEventListener("click", async e => {
