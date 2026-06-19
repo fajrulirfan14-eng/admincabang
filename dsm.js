@@ -4,7 +4,7 @@ import {
   getDoc, doc, deleteDoc, updateDoc, addDoc, setDoc,
   collection, collectionGroup,
   query, where, getDocs, orderBy,
-  serverTimestamp
+  serverTimestamp, deleteField
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 /* ── STATE ─────────────────────────────────── */
@@ -1313,22 +1313,21 @@ function initEvents() {
     const customerId = btn.dataset.customerId;
     const pesan      = document.getElementById("catatanInput")?.value.trim();
 
-    if (!pesan) { showToast("Pesan tidak boleh kosong", "error"); return; }
-
     btn.disabled    = true;
     btn.textContent = "Mengirim...";
 
-    const ok = await simpanEvaluasi(customerId, pesan);
+    const ok = pesan
+      ? await simpanEvaluasi(customerId, pesan)
+      : await hapusEvaluasi(customerId);
     if (ok) {
-      // update customerList cache lokal tanpa tutup accordion
       const c = customerList.find(x => (x.id || x.uid) === customerId);
-      if (c) c.evaluasi = {
+      if (c) c.evaluasi = pesan ? {
         pesan,
         updatedAt: Date.now(),
         updatedBy: currentUser.uid,
         readAt: null,
         readBy: null
-      };
+      } : null;
 
       // tutup popup
       closePopup("catatanOverlay");
@@ -1534,6 +1533,18 @@ async function loadTrikotomi() {
   });
 }
 /* ── EVALUASI CUSTOMER ─────────────────────── */
+async function hapusEvaluasi(customerId) {
+  try {
+    await updateDoc(doc(db, "customer", customerId), {
+      evaluasi: deleteField()
+    });
+    await updateCustomerEvaluasiIDB(customerId, null);
+    return true;
+  } catch (e) {
+    console.error("Gagal hapus evaluasi:", e);
+    return false;
+  }
+}
 async function simpanEvaluasi(customerId, pesan) {
   try {
 
@@ -1584,7 +1595,11 @@ async function updateCustomerEvaluasiIDB(customerId, evaluasi) {
             getReq.onsuccess = () => {
               const existing = getReq.result;
               if (!existing) { resolve(); return; }
-              existing.evaluasi = evaluasi;
+              if (evaluasi === null) {
+                delete existing.evaluasi;
+              } else {
+                existing.evaluasi = evaluasi;
+              }
               st.put(existing);
               tx.oncomplete = () => resolve();
             };
@@ -1827,11 +1842,9 @@ function renderRekap(laporanAdmin = {}, dataHarianMap = {}) {
   rekapRow.innerHTML = `${rekapCellsHtml}<td></td>`;
 }
 async function renderAnalisa() {
-  const groupEl    = document.getElementById("analisaGroups");
-  const subtitleEl = document.getElementById("analisaSubtitle");
+  const groupEl = document.getElementById("analisaGroups");
   if (!groupEl) return;
 
-  // ambil trikotomi dari IndexedDB
   const tri = await loadTrikotomi();
 
   if (!selectedKurirId || !selectedTanggal) {
@@ -1841,82 +1854,54 @@ async function renderAnalisa() {
 
   groupEl.innerHTML = `<div class="analisa-empty">Memuat analisa...</div>`;
 
-  // tanggal referensi (minggu sebelumnya)
   const refDates = triTanggalReferensi();
+  const bulanNama = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agt","Sep","Okt","Nov","Des"];
 
   if (!refDates.length) {
     groupEl.innerHTML = `<div class="analisa-empty">Tidak ada data minggu sebelumnya</div>`;
-    setText("analisaGreen", "0");
-    setText("analisaYellow", "0");
+    setText("analisaGreen", "0"); setText("analisaYellow", "0");
     setText("analisaRed", "0");
     setText("analisaGrey", String(customerList.filter(c => c.hari === selectedHari).length));
     return;
   }
 
-  // ambil dataHarian untuk semua tanggal referensi
-  // T-1: ambil 1 tanggal saja
-  // T-2: ambil 2 tanggal, rata-rata return & expired per customer
-
-  // kumpulkan semua data per customer per tanggal
-  const rawMap = {}; // { cid: [ {return, expired, closing, tanggal}, ... ] }
-
+  // fetch semua data sekaligus
+  const rawMap = {};
   for (const d of refDates) {
-    const tStr    = formatTanggal(d);
-    const cache   = await getDataHarian(selectedKurirId, tStr);
-    const dataMap = cache?.data || {};
-
-    Object.entries(dataMap).forEach(([cid, doc]) => {
+    const tStr  = formatTanggal(d);
+    const cache = await getDataHarian(selectedKurirId, tStr);
+    Object.entries(cache?.data || {}).forEach(([cid, doc]) => {
       if (!rawMap[cid]) rawMap[cid] = [];
       rawMap[cid].push({ ...doc, _tanggal: tStr });
     });
   }
 
-  // hitung rata-rata per customer kalau T-2, ambil langsung kalau T-1
   const latestMap = {};
   Object.entries(rawMap).forEach(([cid, docs]) => {
     if (selectedPeriode === 1 || docs.length === 1) {
-      // T-1 atau hanya ada 1 data → pakai langsung
       latestMap[cid] = docs[0];
     } else {
-      // T-2 → rata-rata return & expired dari semua tanggal yang ada
-      const avgReturn  = {};
-      const avgExpired = {};
-      const avgClosing = {};
-
-      // kumpulkan semua varian
       const allVarian = new Set();
-      docs.forEach(doc => {
-        Object.keys(doc.return  || {}).forEach(v => allVarian.add(v));
-        Object.keys(doc.expired || {}).forEach(v => allVarian.add(v));
-        Object.keys(doc.closing || {}).forEach(v => allVarian.add(v));
+      docs.forEach(d => {
+        Object.keys(d.return  || {}).forEach(v => allVarian.add(v));
+        Object.keys(d.expired || {}).forEach(v => allVarian.add(v));
+        Object.keys(d.closing || {}).forEach(v => allVarian.add(v));
       });
-
+      const avg = {};
       allVarian.forEach(v => {
-        const retVals  = docs.map(d => Number(d.return?.[v]  || 0));
-        const expVals  = docs.map(d => Number(d.expired?.[v] || 0));
-        const closVals = docs.map(d => Number(d.closing?.[v] || 0));
-
-        avgReturn[v]  = Math.round(retVals.reduce((a,b)  => a+b, 0) / docs.length);
-        avgExpired[v] = Math.round(expVals.reduce((a,b)  => a+b, 0) / docs.length);
-        avgClosing[v] = Math.round(closVals.reduce((a,b) => a+b, 0) / docs.length);
+        avg[v] = {
+          r:  Math.round(docs.map(d => Number(d.return?.[v]  || 0)).reduce((a,b) => a+b,0) / docs.length),
+          e:  Math.round(docs.map(d => Number(d.expired?.[v] || 0)).reduce((a,b) => a+b,0) / docs.length),
+          cl: Math.round(docs.map(d => Number(d.closing?.[v] || 0)).reduce((a,b) => a+b,0) / docs.length),
+        };
       });
-
-      latestMap[cid] = {
-        ...docs[docs.length - 1], // ambil metadata dari yang terbaru
-        return:  avgReturn,
-        expired: avgExpired,
-        closing: avgClosing,
-        _tanggal: `rata-rata ${docs.map(d => d._tanggal).join(" & ")}`,
-        _isAvg: true
-      };
+      const avgReturn = {}, avgExpired = {}, avgClosing = {};
+      allVarian.forEach(v => { avgReturn[v] = avg[v].r; avgExpired[v] = avg[v].e; avgClosing[v] = avg[v].cl; });
+      latestMap[cid] = { ...docs[docs.length-1], return: avgReturn, expired: avgExpired, closing: avgClosing };
     }
   });
 
-  // ambil semua tanggal dari minggu 1 sampai minggu aktif di bulan ini
-  const semuaTanggal = hitungMingguDalamBulan(selectedHari, selectedBulan, selectedTahun)
-    .slice(0, mingguKe);
-
-  // load semua dataHarian per tanggal
+  const semuaTanggal = hitungMingguDalamBulan(selectedHari, selectedBulan, selectedTahun).slice(0, mingguKe);
   const dataHarianPerTanggal = {};
   for (const d of semuaTanggal) {
     const tStr  = formatTanggal(d);
@@ -1924,40 +1909,26 @@ async function renderAnalisa() {
     dataHarianPerTanggal[tStr] = cache?.data || {};
   }
 
-  // customer aktif hari ini
   const activeCustomers = customerList.filter(c => c.hari === selectedHari);
 
-  // klasifikasi pakai latestMap seperti sebelumnya
   const result = activeCustomers.map(c => {
     const cid      = c.id || c.uid;
     const dsm      = latestMap[cid] || null;
-    const retTotal = dsm
-      ? Object.values(dsm.return  || {}).reduce((a, v) => a + (Number(v) || 0), 0) : 0;
-    const expTotal = dsm
-      ? Object.values(dsm.expired || {}).reduce((a, v) => a + (Number(v) || 0), 0) : 0;
-
-    // history per minggu
-    const history = semuaTanggal.map((d, idx) => {
+    const retTotal = dsm ? Object.values(dsm.return  || {}).reduce((a,v) => a + (Number(v)||0), 0) : 0;
+    const expTotal = dsm ? Object.values(dsm.expired || {}).reduce((a,v) => a + (Number(v)||0), 0) : 0;
+    const history  = semuaTanggal.map((d, idx) => {
       const tStr      = formatTanggal(d);
       const harianDoc = dataHarianPerTanggal[tStr]?.[cid] || null;
-      const r = harianDoc
-        ? Object.values(harianDoc.return  || {}).reduce((a, v) => a + (Number(v) || 0), 0) : null;
-      const e = harianDoc
-        ? Object.values(harianDoc.expired || {}).reduce((a, v) => a + (Number(v) || 0), 0) : null;
-      const p  = harianDoc
-        ? Object.values(harianDoc.pay     || {}).reduce((a, v) => a + (Number(v) || 0), 0) : null;
-      const cl = harianDoc
-        ? Object.values(harianDoc.closing || {}).reduce((a, v) => a + (Number(v) || 0), 0) : null;
-      const status = harianDoc?.keterangan?.status || null;
-      return { minggu: idx + 1, tanggal: tStr, tgl: d.getDate(), r, e, p, cl, status, hasData: !!harianDoc };
+      const r  = harianDoc ? Object.values(harianDoc.return  || {}).reduce((a,v) => a+(Number(v)||0), 0) : null;
+      const e  = harianDoc ? Object.values(harianDoc.expired || {}).reduce((a,v) => a+(Number(v)||0), 0) : null;
+      const p  = harianDoc ? Object.values(harianDoc.pay     || {}).reduce((a,v) => a+(Number(v)||0), 0) : null;
+      const cl = harianDoc ? Object.values(harianDoc.closing || {}).reduce((a,v) => a+(Number(v)||0), 0) : null;
+      return { minggu: idx+1, tgl: d.getDate(), r, e, p, cl, status: harianDoc?.keterangan?.status || null, hasData: !!harianDoc };
     });
-
     return {
-      nama:       c.namaCustomer || "-",
-      customerId: cid,
-      status:     dsm ? triKlasifikasi(retTotal, expTotal, tri) : "grey",
-      evaluasi:   c.evaluasi || null,
-      retTotal, expTotal, history
+      nama: c.namaCustomer || "-", customerId: cid,
+      status: dsm ? triKlasifikasi(retTotal, expTotal, tri) : "grey",
+      evaluasi: c.evaluasi || null, history
     };
   });
 
@@ -1971,225 +1942,142 @@ async function renderAnalisa() {
   setText("analisaRed",    String(red.length));
   setText("analisaGrey",   String(grey.length));
 
-  const bulanNama = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agt","Sep","Okt","Nov","Des"];
-  const refLabel  = refDates.map(d =>
-    `${selectedHari} ${d.getDate()} ${bulanNama[d.getMonth()]} ${d.getFullYear()}`
-  ).join(", ");
+  const refLabel = refDates.map(d => `${selectedHari} ${d.getDate()} ${bulanNama[d.getMonth()]} ${d.getFullYear()}`).join(", ");
   setText("analisaSubtitle", `Referensi: ${refLabel}`);
 
-  const bulanNama2 = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agt","Sep","Okt","Nov","Des"];
-  function setupAhDragScroll() {
-    document.querySelectorAll(".ah-table-wrap").forEach(wrap => {
-      let isDown  = false;
-      let startX  = 0;
-      let scrollL = 0;
+  // ── BUILD TABEL TUNGGAL ──
+  // thead baris 1: Customer + per minggu (colspan 4) + % (colspan 3) + Evaluasi (colspan 8) + Status
+  let th1 = `<th rowspan="2" class="at-th at-no">No.</th><th rowspan="2" class="at-th at-nama">Customer</th>`;
+  semuaTanggal.forEach((d, i) => {
+    const mc = `at-mg-${(i % 5) + 1}`;
+    const isActive = (i + 1) === mingguKe;
+    th1 += `<th colspan="4" class="at-th ${mc} ${isActive ? "at-active-head" : ""}">Mg${i+1} · ${d.getDate()} ${bulanNama[d.getMonth()]}</th>`;
+    th1 += `<th colspan="3" class="at-th ${mc} at-persen-head">%</th>`;
+  });
+  th1 += `<th colspan="8" class="at-th at-eval-head">Evaluasi</th>`;
+  th1 += `<th rowspan="2" class="at-th at-status-head">Status</th>`;
 
-      wrap.addEventListener("mousedown", e => {
-        isDown  = true;
-        startX  = e.pageX - wrap.offsetLeft;
-        scrollL = wrap.scrollLeft;
-        wrap.classList.add("grabbing");
-      });
-      document.addEventListener("mouseup", () => {
-        isDown = false;
-        wrap.classList.remove("grabbing");
-      });
-      document.addEventListener("mousemove", e => {
-        if (!isDown) return;
-        const x = e.pageX - wrap.offsetLeft;
-        wrap.scrollLeft = scrollL - (x - startX);
-      });
+  // thead baris 2: sub kolom
+  let th2 = "";
+  semuaTanggal.forEach((d, i) => {
+    const sc = `at-sub-${(i % 5) + 1}`;
+    th2 += `<th class="at-sub ${sc}">Return</th><th class="at-sub ${sc}">Expired</th><th class="at-sub ${sc}">Pay</th><th class="at-sub ${sc}">Ket</th>`;
+    th2 += `<th class="at-sub ${sc} at-persen">R%</th><th class="at-sub ${sc} at-persen">E%</th><th class="at-sub ${sc} at-persen">P%</th>`;
+  });
+  th2 += `<th class="at-sub at-eval">Return</th><th class="at-sub at-eval">Expired</th><th class="at-sub at-eval">Pay</th>`;
+  th2 += `<th class="at-sub at-eval">R%</th><th class="at-sub at-eval">E%</th><th class="at-sub at-eval">P%</th>`;
+  th2 += `<th class="at-sub at-eval">Tutup</th><th class="at-sub at-eval">Pending</th>`;
 
-      // touch
-      let tx = 0, tl = 0;
-      wrap.addEventListener("touchstart", e => {
-        tx = e.touches[0].pageX;
-        tl = wrap.scrollLeft;
-      }, { passive: true });
-      wrap.addEventListener("touchmove", e => {
-        wrap.scrollLeft = tl - (e.touches[0].pageX - tx);
-      }, { passive: true });
-    });
-  }
+  // tbody rows
+  const statusOrder = ["green","yellow","red","grey"];
+  const sortedResult = [...result].sort((a,b) => statusOrder.indexOf(a.status) - statusOrder.indexOf(b.status));
 
-  function buildHistoryRows(history, customerId, evaluasi) {
-    // kelompokkan history sesuai periode
-    // T-1: setiap minggu sendiri, T-2: pasangan 2 minggu
-    const groups = [];
-    if (selectedPeriode === 1) {
-      history.forEach(h => groups.push([h]));
-    } else {
-      for (let i = 0; i < history.length; i += 2) {
-        groups.push(history.slice(i, i + 2));
+  const rows = sortedResult.map(c => {
+    const evalR  = c.history.reduce((a,h) => a + (h.hasData ? (h.r  || 0) : 0), 0);
+    const evalE  = c.history.reduce((a,h) => a + (h.hasData ? (h.e  || 0) : 0), 0);
+    const evalP  = c.history.reduce((a,h) => a + (h.hasData ? (h.p  || 0) : 0), 0);
+    const evalCl = c.history.reduce((a,h) => a + (h.hasData ? (h.cl || 0) : 0), 0);
+    const evalRp = evalP  > 0 ? Math.floor((evalR/evalP)*100)  + "%" : "0%";
+    const evalEp = evalP  > 0 ? Math.floor((evalE/evalP)*100)  + "%" : "0%";
+    const evalPp = evalCl > 0 ? Math.floor((evalP/evalCl)*100) + "%" : "0%";
+    const evalTP = c.history.filter(h => h.hasData && h.status?.toLowerCase() === "tutup").length;
+    const evalPN = c.history.filter(h => h.hasData && h.status?.toLowerCase() === "pending").length;
+
+    const statusCls = { green:"at-row-green", yellow:"at-row-yellow", red:"at-row-red", grey:"" }[c.status] || "";
+
+    const bgCls = { green:"at-bg-green", yellow:"at-bg-yellow", red:"at-bg-red", grey:"" }[c.status] || "";
+    const rowCls = bgCls;
+    const rowNo = sortedResult.indexOf(c) + 1;
+    let cells = `<td class="at-td at-no-cell">${rowNo}</td><td class="at-td at-nama-cell ${bgCls}">${esc(c.nama)}</td>`;
+
+    // per minggu
+    let prevP = 0, prevCl = 0;
+    c.history.forEach((h, i) => {
+      const isActive = h.minggu === mingguKe;
+      const ac = isActive ? "at-active" : "";
+      const grp = selectedPeriode === 2 && i % 2 === 1 ? [c.history[i-1], h] : [h];
+      const totalR  = grp.reduce((a,g) => a + (g.hasData ? (g.r  || 0) : 0), 0);
+      const totalE  = grp.reduce((a,g) => a + (g.hasData ? (g.e  || 0) : 0), 0);
+      const totalP  = grp.reduce((a,g) => a + (g.hasData ? (g.p  || 0) : 0), 0);
+      const totalCl = grp.reduce((a,g) => a + (g.hasData ? (g.cl || 0) : 0), 0);
+      const rp = totalP  > 0 ? Math.floor((totalR/totalP)*100)  + "%" : "—";
+      const ep = totalP  > 0 ? Math.floor((totalE/totalP)*100)  + "%" : "—";
+      const pp = totalCl > 0 ? Math.floor((totalP/totalCl)*100) + "%" : "—";
+      const stc = h.status ? `at-ket-${h.status.toLowerCase()}` : "";
+
+      if (!h.hasData) {
+        cells += `<td class="at-td ${ac}" colspan="4">—</td>`;
+      } else {
+        cells += `<td class="at-td ${ac}">${h.r ?? "—"}</td>`;
+        cells += `<td class="at-td ${ac}">${h.e ?? "—"}</td>`;
+        cells += `<td class="at-td ${ac}">${h.p ?? "—"}</td>`;
+        cells += `<td class="at-td ${ac} ${stc}">${h.status || "—"}</td>`;
       }
+      cells += `<td class="at-td at-persen-val ${ac}">${rp}</td>`;
+      cells += `<td class="at-td at-persen-val ${ac}">${ep}</td>`;
+      cells += `<td class="at-td at-persen-val ${ac}">${pp}</td>`;
+    });
+
+    // evaluasi
+    cells += `<td class="at-td at-eval-val">${evalR || ""}</td>`;
+    cells += `<td class="at-td at-eval-val">${evalE || ""}</td>`;
+    cells += `<td class="at-td at-eval-val">${evalP || ""}</td>`;
+    cells += `<td class="at-td at-eval-val">${evalRp}</td>`;
+    cells += `<td class="at-td at-eval-val">${evalEp}</td>`;
+    cells += `<td class="at-td at-eval-val">${evalPp}</td>`;
+    cells += `<td class="at-td at-eval-val">${evalTP || ""}</td>`;
+    cells += `<td class="at-td at-eval-val">${evalPN || ""}</td>`;
+
+    // tanggal komentar terakhir
+    let evalTgl = "";
+    if (c.evaluasi?.updatedAt) {
+      const d_  = new Date(c.evaluasi.updatedAt);
+      const hn  = ["Min","Sen","Sel","Rab","Kam","Jum","Sab"];
+      const bn_ = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agt","Sep","Okt","Nov","Des"];
+      const mg  = hitungMingguKe(c.evaluasi.updatedAt, selectedHari, selectedBulan, selectedTahun);
+      const mgLabel = (mg !== null && !String(mg).includes("/")) ? `Mg${mg} · ` : "";
+      evalTgl = `${mgLabel}${hn[d_.getDay()]}, ${d_.getDate()} ${bn_[d_.getMonth()]} ${d_.getFullYear()}`;
     }
 
-    // hitung persentase per group
-    function calcPersen(grp) {
-      const totalR  = grp.reduce((a, h) => a + (h.hasData ? (h.r  || 0) : 0), 0);
-      const totalE  = grp.reduce((a, h) => a + (h.hasData ? (h.e  || 0) : 0), 0);
-      const totalP  = grp.reduce((a, h) => a + (h.hasData ? (h.p  || 0) : 0), 0);
-      const totalCl = grp.reduce((a, h) => a + (h.hasData ? (h.cl || 0) : 0), 0);
-      const rp  = totalP  > 0 ? Math.floor((totalR / totalP)  * 100) : 0;
-      const ep  = totalP  > 0 ? Math.floor((totalE / totalP)  * 100) : 0;
-      const pp  = totalCl > 0 ? Math.floor((totalP / totalCl) * 100) : 0;
-      return { rp: rp + "%", ep: ep + "%", pp: pp + "%" };
-    }
-    // hitung evaluasi akumulasi semua minggu
-    const evalR  = history.reduce((a, h) => a + (h.hasData ? (h.r  || 0) : 0), 0);
-    const evalE  = history.reduce((a, h) => a + (h.hasData ? (h.e  || 0) : 0), 0);
-    const evalP  = history.reduce((a, h) => a + (h.hasData ? (h.p  || 0) : 0), 0);
-    const evalCl = history.reduce((a, h) => a + (h.hasData ? (h.cl || 0) : 0), 0);
-    const evalRp = evalP  > 0 ? Math.floor((evalR / evalP)  * 100) + "%" : "0%";
-    const evalEp = evalP  > 0 ? Math.floor((evalE / evalP)  * 100) + "%" : "0%";
-    const evalPp = evalCl > 0 ? Math.floor((evalP / evalCl) * 100) + "%" : "0%";
-    const evalTP = history.filter(h => h.hasData && h.status?.toLowerCase() === "tutup").length;
-    const evalPN = history.filter(h => h.hasData && h.status?.toLowerCase() === "pending").length;
-
-    // ROW 1: header minggu + header persentase
-    let mgHeaders = "";
-    groups.forEach((grp, gi) => {
-      const mc = `aht-mg-${(gi % 5) + 1}`;
-      grp.forEach(h => {
-        const isActive = h.minggu === mingguKe;
-        mgHeaders += `<th colspan="4" class="aht-mg-head ${mc} ${isActive ? "aht-active" : ""}">
-          Mg${h.minggu} · ${h.tgl} ${bulanNama2[selectedBulan]}
-        </th>`;
-      });
-      mgHeaders += `<th colspan="3" class="aht-mg-head ${mc} aht-persen-head">%</th>`;
-    });
-    // kolom evaluasi di akhir
-    mgHeaders += `<th colspan="9" class="aht-mg-head aht-eval-head">Evaluasi</th>`;
-
-    // ROW 2: sub header R E P Ket + R% E%
-    let subHeaders = "";
-    groups.forEach((grp, gi) => {
-      const sc = `aht-sub-${(gi % 5) + 1}`;
-      grp.forEach(h => {
-        subHeaders += `
-          <th class="aht-sub ${sc} aht-r-label">Return</th>
-          <th class="aht-sub ${sc} aht-e-label">Expired</th>
-          <th class="aht-sub ${sc} aht-p-label">Pay</th>
-          <th class="aht-sub ${sc} aht-s-label">Ket</th>`;
-      });
-      subHeaders += `
-        <th class="aht-sub ${sc} aht-persen-r">Return%</th>
-        <th class="aht-sub ${sc} aht-persen-e">Expired%</th>
-        <th class="aht-sub ${sc} aht-persen-p">Pay%</th>`;
-    });
-    subHeaders += `
-      <th class="aht-sub aht-eval-r">Return</th>
-      <th class="aht-sub aht-eval-e">Expired</th>
-      <th class="aht-sub aht-eval-p">Pay</th>
-      <th class="aht-sub aht-eval-rp">Return%</th>
-      <th class="aht-sub aht-eval-ep">Expired%</th>
-      <th class="aht-sub aht-eval-pp">Pay%</th>
-      <th class="aht-sub aht-eval-tp">Tutup</th>
-      <th class="aht-sub aht-eval-pn">Pending</th>
-      <th class="aht-sub aht-catatan-sub">
-        <button
-          class="catatan-head-btn"
-          data-customer-id="${customerId}"
-          data-pesan="${esc(evaluasi?.pesan || "")}"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" style="width:12px;height:12px">
-            <path d="M3.478 2.404a.75.75 0 0 0-.926.941l2.432 7.905H13.5a.75.75 0 0 1 0 1.5H4.984l-2.432 7.905a.75.75 0 0 0 .926.94 60.519 60.519 0 0 0 18.445-8.986.75.75 0 0 0 0-1.218A60.517 60.517 0 0 0 3.478 2.404Z" />
-          </svg>
-          Komentar
+    const statusLabel = { green:"🟢", yellow:"🟡", red:"🔴", grey:"⚪" }[c.status] || "⚪";
+    cells += `<td class="at-td at-status-cell">
+      <div class="at-status-wrap">
+        <span>${statusLabel}</span>
+        <button class="catatan-head-btn at-catatan-btn" data-customer-id="${c.customerId}" data-pesan="${esc(c.evaluasi?.pesan || "")}">
+          <svg viewBox="0 0 24 24" fill="currentColor" style="width:11px;height:11px"><path d="M3.478 2.404a.75.75 0 0 0-.926.941l2.432 7.905H13.5a.75.75 0 0 1 0 1.5H4.984l-2.432 7.905a.75.75 0 0 0 .926.94 60.519 60.519 0 0 0 18.445-8.986.75.75 0 0 0 0-1.218A60.517 60.517 0 0 0 3.478 2.404Z"/></svg>
         </button>
-      </th>`;
-
-    // ROW 3: nilai + persentase
-    let valueCells = "";
-    groups.forEach((grp, gi) => {
-      grp.forEach(h => {
-        const isActive = h.minggu === mingguKe;
-        const ac  = isActive ? "aht-active" : "";
-        const stc = h.status ? `aht-status-${h.status.toLowerCase()}` : "";
-        if (!h.hasData) {
-          valueCells += `<td class="aht-empty ${ac}" colspan="4">—</td>`;
-        } else {
-          valueCells += `
-            <td class="aht-val aht-r ${ac}">${h.r ?? "—"}</td>
-            <td class="aht-val aht-e ${ac}">${h.e ?? "—"}</td>
-            <td class="aht-val aht-p ${ac}">${h.p ?? "—"}</td>
-            <td class="aht-status-cell ${stc} ${ac}">${h.status || "—"}</td>`;
-        }
-      });
-      const { rp, ep, pp } = calcPersen(grp);
-      valueCells += `
-        <td class="aht-val aht-persen-r-val">${rp}</td>
-        <td class="aht-val aht-persen-e-val">${ep}</td>
-        <td class="aht-val aht-persen-p-val">${pp}</td>`;
-    });
-    // sel evaluasi
-    // label minggu evaluasi
-    let evalTgl = "—";
-    if (evaluasi?.updatedAt) {
-      const mg = hitungMingguKe(evaluasi.updatedAt, selectedHari, selectedBulan, selectedTahun);
-      if (mg !== null) {
-        const d   = new Date(evaluasi.updatedAt);
-        const hn  = ["Min","Sen","Sel","Rab","Kam","Jum","Sab"];
-        const bn  = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agt","Sep","Okt","Nov","Des"];
-        evalTgl   = `Mg${mg} · ${hn[d.getDay()]}, ${d.getDate()} ${bn[d.getMonth()]}`;
+      </div>
+      ${evalTgl
+        ? `<div class="at-eval-tgl" title="${esc(c.evaluasi?.pesan || "")}"> ${evalTgl}</div>`
+        : `<div class="at-eval-tgl at-eval-tgl-empty">Tidak ada</div>`
       }
-    }
-    const hasEval = !!evaluasi?.pesan;
+    </td>`;
 
-    valueCells += `
-      <td class="aht-val aht-eval-r-val">${evalR || ""}</td>
-      <td class="aht-val aht-eval-e-val">${evalE || ""}</td>
-      <td class="aht-val aht-eval-p-val">${evalP || ""}</td>
-      <td class="aht-val aht-eval-rp-val">${evalRp}</td>
-      <td class="aht-val aht-eval-ep-val">${evalEp}</td>
-      <td class="aht-val aht-eval-pp-val">${evalPp}</td>
-      <td class="aht-val aht-eval-tp-val">${evalTP || ""}</td>
-      <td class="aht-val aht-eval-pn-val">${evalPN || ""}</td>
-      <td class="aht-val aht-catatan-val">
-        <span class="catatan-tgl">${hasEval ? evalTgl : "—"}</span>
-      </td>`;
+    return `<tr class="${rowCls}-row">${cells}</tr>`;
+  }).join("");
 
-    return `
-      <div class="ah-table-wrap">
-        <table class="ah-table">
-          <thead>
-            <tr>${mgHeaders}</tr>
-            <tr>${subHeaders}</tr>
-          </thead>
-          <tbody>
-            <tr>${valueCells}</tr>
-          </tbody>
-        </table>
-      </div>`;
+  groupEl.innerHTML = `
+    <div class="at-wrap">
+      <table class="at-table">
+        <thead>
+          <tr>${th1}</tr>
+          <tr>${th2}</tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+
+  // drag scroll
+  const atWrap = groupEl.querySelector(".at-wrap");
+  if (atWrap) {
+    let dn = false, sx = 0, sl = 0;
+    atWrap.addEventListener("mousedown", e => { if(e.button!==0||e.target.closest("button"))return; dn=true; sx=e.pageX-atWrap.offsetLeft; sl=atWrap.scrollLeft; atWrap.style.cursor="grabbing"; });
+    document.addEventListener("mouseup", () => { dn=false; atWrap.style.cursor=""; });
+    document.addEventListener("mousemove", e => { if(!dn)return; atWrap.scrollLeft=sl-(e.pageX-atWrap.offsetLeft-sx); });
+    let tx=0, tl=0;
+    atWrap.addEventListener("touchstart", e => { tx=e.touches[0].pageX; tl=atWrap.scrollLeft; }, {passive:true});
+    atWrap.addEventListener("touchmove", e => { atWrap.scrollLeft=tl-(e.touches[0].pageX-tx); }, {passive:true});
   }
-
-  function buildGroup(title, color, data) {
-    if (!data.length) return "";
-    const items = data.map(c => `
-      <div class="analisa-customer-item">
-        <div class="analisa-customer-name">${esc(c.nama)}</div>
-        <div class="ah-history">
-          ${buildHistoryRows(c.history, c.customerId, c.evaluasi)}
-        </div>
-      </div>`).join("");
-
-    return `
-      <div class="analisa-group ${color}">
-        <div class="analisa-group-head" onclick="this.parentElement.classList.toggle('open')">
-          <span>${title} — ${data.length} customer</span>
-          <span class="analisa-group-count">▶</span>
-        </div>
-        <div class="analisa-group-body">${items}</div>
-      </div>`;
-  }
-
-  groupEl.innerHTML =
-    buildGroup("🟢 Produktif",      "green",  green)  +
-    buildGroup("🟡 Stabil",         "yellow", yellow) +
-    buildGroup("🔴 Non Produktif",  "red",    red)    +
-    buildGroup("⚪ Belum Ada Data", "grey",   grey)   ||
-    `<div class="analisa-empty">Tidak ada customer</div>`;
-  setupAhDragScroll();
 }
 /* ── NOTIFIKASI EVALUASI ───────────────────── */
 async function kirimNotifEvaluasi(judul, pesan) {

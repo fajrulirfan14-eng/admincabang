@@ -291,7 +291,132 @@ tbody tr:hover td.td-nama{background:var(--bg)}
   color:#7A5230;
   white-space:nowrap;
 }
+/* ANALISA TABEL */
+.at-wrap{
+  overflow-x:auto;
+  overflow-y:auto;
+  max-height:60vh;
+  scrollbar-width:thin;
+  cursor:grab;
+}
+.at-wrap::-webkit-scrollbar{width:4px;height:4px}
+.at-wrap::-webkit-scrollbar-thumb{background:var(--border);border-radius:99px}
+.at-wrap.grabbing{cursor:grabbing}
+.at-table{border-collapse:collapse;min-width:max-content;width:100%}
+.at-th{
+  padding:8px 10px;
+  font-size:11px;
+  font-weight:700;
+  text-align:center;
+  white-space:nowrap;
+  background:var(--bg);
+  border:1px solid var(--border);
+  position:sticky;
+  top:0;
+  z-index:10;
+  color:var(--text-muted);
+  letter-spacing:.04em;
+  text-transform:uppercase;
+}
+.at-th.at-nama{
+  left:0;z-index:11;
+  background:var(--bg);
+  text-align:left;
+  min-width:160px;
+}
+.at-sub{
+  padding:6px 8px;
+  font-size:10px;
+  font-weight:700;
+  text-align:center;
+  white-space:nowrap;
+  border:1px solid var(--border);
+  position:sticky;
+  top:33px;
+  z-index:9;
+  color:var(--text-muted);
+}
+.at-td{
+  padding:5px 8px;
+  font-size:12px;
+  text-align:center;
+  border:1px solid var(--border);
+  white-space:nowrap;
+  color:var(--text);
+}
+.at-nama-cell{
+  text-align:left !important;
+  font-weight:600;
+  position:sticky;
+  left:0;
+  background:var(--card);
+  z-index:2;
+  min-width:160px;
+  padding-left:12px !important;
+}
+.at-no{min-width:40px;width:40px;position:sticky;left:0;z-index:11;background:var(--bg)}
+.at-no-cell{
+  text-align:center;
+  color:var(--text-muted);
+  font-size:11px;
+  position:sticky;
+  left:0;
+  background:var(--card);
+  z-index:2;
+  min-width:40px;
+  width:40px;
+}
+.at-active-head{background:var(--primary-light) !important;color:var(--primary-dark) !important}
+.at-active{background:rgba(201,166,123,.08)}
+.at-persen-head{background:#f0f0f0 !important}
+.at-persen-val{color:var(--text-muted);font-size:11px}
+.at-eval-head{background:#3A312A !important;color:#fff !important}
+.at-eval{background:#4a3f38 !important;color:rgba(255,255,255,.85) !important}
+.at-eval-val{background:rgba(58,49,42,.04)}
+.at-status-head{background:var(--bg) !important}
+.at-status-cell{min-width:60px}
+.at-status-wrap{display:flex;align-items:center;justify-content:center;gap:6px}
+.at-catatan-btn{
+  border:none;background:none;cursor:pointer;
+  padding:3px;border-radius:6px;
+  color:var(--text-muted);
+  display:flex;align-items:center;
+}
+.at-catatan-btn:hover{background:var(--primary-light);color:var(--primary-dark)}
+.at-ket-tutup{background:#FDECEA;color:#C0534A;font-weight:700}
+.at-ket-pending{background:#FEF9EC;color:#C0924A;font-weight:700}
+.at-ket-putus{background:#F5F5F5;color:#888;font-weight:700}
+.at-row-green td.at-nama-cell{border-left:3px solid var(--green)}
+.at-row-yellow td.at-nama-cell{border-left:3px solid #E0B84A}
+.at-row-red td.at-nama-cell{border-left:3px solid var(--red)}
 
+.at-bg-green{background:#d4edda !important;color:#1a5c32 !important;font-weight:700}
+.at-bg-yellow{background:#fff3cd !important;color:#7d5a00 !important;font-weight:700}
+.at-bg-red{background:#f8d7da !important;color:#842029 !important;font-weight:700}
+
+tr.at-bg-green-row td{background:#eaf7ed !important}
+tr.at-bg-yellow-row td{background:#fffae6 !important}
+tr.at-bg-red-row td{background:#fdf0f1 !important}
+
+.at-eval-tgl{
+  font-size:9px;
+  color:var(--text-heading);
+  text-align:center;
+  margin-top:3px;
+  white-space:nowrap;
+}
+
+/* warna per minggu */
+.at-mg-1{background:#EEF4FF !important;color:#4A72C4 !important}
+.at-mg-2{background:#FFF0EE !important;color:#C45A4A !important}
+.at-mg-3{background:#EEFAF2 !important;color:#4A9B6A !important}
+.at-mg-4{background:#F0EEFF !important;color:#6A4AC4 !important}
+.at-mg-5{background:#FFF8EE !important;color:#C47A2A !important}
+.at-sub-1{background:#f5f8ff !important}
+.at-sub-2{background:#fff5f4 !important}
+.at-sub-3{background:#f4fdf7 !important}
+.at-sub-4{background:#f7f5ff !important}
+.at-sub-5{background:#fffaf4 !important}
 /* SUM ROW */
 .sum-row{position:sticky;bottom:0;z-index:8}
 .sum-row td{
