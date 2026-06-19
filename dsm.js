@@ -701,6 +701,7 @@ async function applyFilter() {
 
   renderTable();
   renderRekap(laporanAdmin, dataHarianMap);
+  requestAnimationFrame(() => syncFootColWidths());
   renderAnalisa();
 }
 
@@ -971,10 +972,38 @@ function closePopup(id) { document.getElementById(id)?.classList.remove("show");
 
 /* ── EVENTS ────────────────────────────────── */
 let _cellTimer = null;
+function syncFootColWidths() {
+  const mainTable = document.getElementById("dsmTable");
+  const footTable = document.getElementById("dsmFootTable");
+  if (!mainTable || !footTable) return;
+
+  // ambil lebar dari tbody row pertama — paling akurat
+  const firstRow = mainTable.querySelector("tbody tr:first-child");
+  if (!firstRow) return;
+
+  const cells = firstRow.querySelectorAll("td");
+  if (!cells.length) return;
+
+  const widths = [...cells].map(td => td.getBoundingClientRect().width);
+
+  let cg = footTable.querySelector("colgroup");
+  if (!cg) { cg = document.createElement("colgroup"); footTable.prepend(cg); }
+  cg.innerHTML = widths.map(w => `<col style="width:${w}px;min-width:${w}px;max-width:${w}px">`).join("");
+}
 /* ── DRAG SCROLL HORIZONTAL TABLE ──────────── */
 function setupTableDragScroll() {
-  const wrap = document.querySelector(".table-wrap");
+  const wrap = document.querySelector(".table-main-wrap");
   if (!wrap) return;
+
+  // sync scroll horizontal tfoot ikut tbody
+  const footWrap = document.querySelector(".table-foot-wrap");
+  if (footWrap) {
+    wrap.addEventListener("scroll", () => {
+      footWrap.scrollLeft = wrap.scrollLeft;
+    });
+  }
+  // sync lebar kolom foot dengan tabel utama
+  syncFootColWidths();
 
   let isDown   = false;
   let startX   = 0;

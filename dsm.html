@@ -127,21 +127,27 @@
 
     <!-- TABLE CARD -->
     <div class="table-card">
-      <div class="table-wrap">
-        <table id="dsmTable">
-          <thead></thead>
-          <tfoot id="dsmTfoot"></tfoot>
-          <tbody id="dsmTableBody">
-            <tr>
-              <td colspan="20" class="table-empty">
-                <div class="empty-state">
-                  <svg viewBox="0 0 24 24"><path d="M9 17H5a2 2 0 0 0-2 2"/><path d="M14 7h5a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-5"/><rect x="3" y="3" width="11" height="11" rx="2"/></svg>
-                  <span>Belum ada data</span>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+      <div class="table-container">
+        <div class="table-main-wrap">
+          <table id="dsmTable">
+            <thead></thead>
+            <tbody id="dsmTableBody">
+              <tr>
+                <td colspan="20" class="table-empty">
+                  <div class="empty-state">
+                    <svg viewBox="0 0 24 24"><path d="M9 17H5a2 2 0 0 0-2 2"/><path d="M14 7h5a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-5"/><rect x="3" y="3" width="11" height="11" rx="2"/></svg>
+                    <span>Belum ada data</span>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="table-foot-wrap">
+          <table id="dsmFootTable">
+            <tfoot id="dsmTfoot"></tfoot>
+          </table>
+        </div>
       </div>
 
       <!-- PAGINATION MINGGU -->

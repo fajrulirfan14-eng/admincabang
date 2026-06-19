@@ -103,9 +103,30 @@ html,body{height:100%;font-family:'Inter',sans-serif;background:var(--bg);color:
 
 /* TABLE CARD */
 .table-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow)}
-.table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
-.table-wrap::-webkit-scrollbar{height:4px}
-.table-wrap::-webkit-scrollbar-thumb{background:var(--border);border-radius:99px}
+
+.table-container{
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+}
+
+.table-main-wrap{
+  overflow-x:auto;
+  overflow-y:auto;
+  max-height:calc(100vh - 300px);
+  scrollbar-width:thin;
+}
+.table-main-wrap::-webkit-scrollbar{width:4px;height:4px}
+.table-main-wrap::-webkit-scrollbar-thumb{background:var(--border);border-radius:99px}
+
+.table-foot-wrap{
+  overflow-x:auto;
+  overflow-y:visible;
+  border-top:2px solid var(--primary);
+  scrollbar-width:none;
+  flex-shrink:0;
+}
+.table-foot-wrap::-webkit-scrollbar{display:none}
 
 table{width:100%;border-collapse:collapse;min-width:max-content}
 
@@ -124,7 +145,11 @@ thead th{
   white-space:nowrap;
   position:sticky;
   top:0;
-  z-index:2;
+  z-index:10;
+}
+thead tr:nth-child(2) th{
+  top:41px;
+  z-index:9;
 }
 thead th:last-child{border-right:none}
 thead th[rowspan="2"]{vertical-align:middle;background:var(--bg)}
@@ -214,7 +239,7 @@ tbody tr:hover td.td-nama{background:var(--bg)}
 
 /* sub header per group */
 .thead-rekap-sub th{
-  font-size:15px;
+  font-size:12px;
   font-weight:700;
   text-align:center;
   border-bottom:2px solid rgba(255,255,255,.2);
@@ -268,7 +293,7 @@ tbody tr:hover td.td-nama{background:var(--bg)}
 }
 
 /* SUM ROW */
-.sum-row{position:sticky;bottom:0;z-index:3}
+.sum-row{position:sticky;bottom:0;z-index:8}
 .sum-row td{
   background:var(--primary-light);
   border-top:2px solid var(--primary);
