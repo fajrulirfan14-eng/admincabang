@@ -1160,6 +1160,23 @@ async function buildPopupForm(type, nama, uidMarketing) {
   const isPembayaran = type === "pembayaran";
   let inputsHtml = "";
 
+  // ambil harga dari varian kurir yang dipilih
+  let varianKurir = {};
+  if (isPembayaran) {
+    try {
+      const kurirSnap = await getDoc(doc(db, "users", uidMarketing));
+      if (kurirSnap.exists()) {
+        const kurirData = kurirSnap.data();
+        (kurirData.varian || []).forEach(item => {
+          const key = Object.keys(item)[0];
+          if (key) varianKurir[key] = item[key];
+        });
+      }
+    } catch (err) {
+      console.error("Gagal load varian kurir:", err);
+    }
+  }
+
   varian.forEach(item => {
     const namaKey = Object.keys(item)[0];
     if (!namaKey) return;
@@ -1167,7 +1184,7 @@ async function buildPopupForm(type, nama, uidMarketing) {
     if (!detail || detail.isAktif !== true) return;
 
     if (isPembayaran) {
-      const hargaProduksi = detail.hargaProduksi || 0;
+      const hargaProduksi = varianKurir[namaKey]?.hargaProduksi || detail.hargaProduksi || 0;
       inputsHtml += `
         <div class="popup-payment-row" data-key="${escapeHtml(namaKey)}">
           <div class="payment-inline">
