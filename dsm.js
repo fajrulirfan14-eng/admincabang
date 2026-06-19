@@ -747,7 +747,7 @@ function renderTable() {
     const isInaktif  = customer?.status === false;
     const harianDoc_ = _dataHarianMap[d.customerId] || {};
     const statusKet  = harianDoc_?.keterangan?.status?.toLowerCase() || "";
-    const badgeMap   = { tutup: "TP", pending: "PN", putus: "PT" };
+    const badgeMap   = { tutup: "Tutup", pending: "Pending", putus: "Putus" };
     const badgeLabel = badgeMap[statusKet] || "";
     const fotoKeterangan = harianDoc_?.keterangan?.foto || customer?.foto || "";
     const badgeHtml  = badgeLabel
@@ -2038,25 +2038,25 @@ async function renderAnalisa() {
       const sc = `aht-sub-${(gi % 5) + 1}`;
       grp.forEach(h => {
         subHeaders += `
-          <th class="aht-sub ${sc} aht-r-label">R</th>
-          <th class="aht-sub ${sc} aht-e-label">E</th>
-          <th class="aht-sub ${sc} aht-p-label">P</th>
+          <th class="aht-sub ${sc} aht-r-label">Return</th>
+          <th class="aht-sub ${sc} aht-e-label">Expired</th>
+          <th class="aht-sub ${sc} aht-p-label">Pay</th>
           <th class="aht-sub ${sc} aht-s-label">Ket</th>`;
       });
       subHeaders += `
-        <th class="aht-sub ${sc} aht-persen-r">R%</th>
-        <th class="aht-sub ${sc} aht-persen-e">E%</th>
-        <th class="aht-sub ${sc} aht-persen-p">P%</th>`;
+        <th class="aht-sub ${sc} aht-persen-r">Return%</th>
+        <th class="aht-sub ${sc} aht-persen-e">Expired%</th>
+        <th class="aht-sub ${sc} aht-persen-p">Pay%</th>`;
     });
     subHeaders += `
-      <th class="aht-sub aht-eval-r">R</th>
-      <th class="aht-sub aht-eval-e">E</th>
-      <th class="aht-sub aht-eval-p">P</th>
-      <th class="aht-sub aht-eval-rp">R%</th>
-      <th class="aht-sub aht-eval-ep">E%</th>
-      <th class="aht-sub aht-eval-pp">P%</th>
-      <th class="aht-sub aht-eval-tp">TP</th>
-      <th class="aht-sub aht-eval-pn">PN</th>
+      <th class="aht-sub aht-eval-r">Return</th>
+      <th class="aht-sub aht-eval-e">Expired</th>
+      <th class="aht-sub aht-eval-p">Pay</th>
+      <th class="aht-sub aht-eval-rp">Return%</th>
+      <th class="aht-sub aht-eval-ep">Expired%</th>
+      <th class="aht-sub aht-eval-pp">Pay%</th>
+      <th class="aht-sub aht-eval-tp">Tutup</th>
+      <th class="aht-sub aht-eval-pn">Pending</th>
       <th class="aht-sub aht-catatan-sub">
         <button
           class="catatan-head-btn"
