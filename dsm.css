@@ -643,7 +643,7 @@ tbody tr:hover .cell-closing   {background:rgba(74,138,74,.10)}
 
 /* MINGGU HEADER */
 .aht-mg-head{
-  font-size:10px;font-weight:700;text-align:center;
+  font-size:13px;font-weight:700;text-align:center;
   border-bottom:2px solid rgba(0,0,0,.08);
   padding:6px 12px;min-width:180px;
   background:var(--bg);color:var(--text-muted);
@@ -656,7 +656,7 @@ tbody tr:hover .cell-closing   {background:rgba(74,138,74,.10)}
 
 /* SUB HEADER */
 .aht-sub{
-  font-size:10px;font-weight:700;text-align:center;
+  font-size:13px;font-weight:700;text-align:center;
   padding:3px 10px;background:var(--bg);
   border-bottom:2px solid var(--border);min-width:40px;
 }

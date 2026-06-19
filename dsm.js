@@ -485,7 +485,7 @@ function renderThead() {
 
   const row1 = `
     <tr>
-      <th rowspan="2">#</th>
+      <th rowspan="2">No.</th>
       <th rowspan="2" style="text-align:left;min-width:140px">Nama Customer</th>
       ${groupHeaders}
       <th rowspan="2">Aksi</th>
