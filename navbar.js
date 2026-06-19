@@ -279,3 +279,15 @@ document.addEventListener("DOMContentLoaded", function () {
 
   overlay.addEventListener("click", closeNav);
 });
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    const lastActive = Number(sessionStorage.getItem("lastActiveAt") || 0);
+    const idle = Date.now() - lastActive;
+    if (idle > 10 * 60 * 1000) {
+      window.location.reload();
+    }
+  } else {
+    sessionStorage.setItem("lastActiveAt", Date.now());
+  }
+});
