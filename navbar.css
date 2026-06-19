@@ -77,10 +77,7 @@ body.nav-open{
   right:-320px;
   width:290px;
   height:100vh;
-  background: rgba(255,255,255,.18);
-  backdrop-filter: blur(30px);
-  border-left: 1px solid rgba(255,255,255,.25);
-  box-shadow: -10px 0 40px rgba(176,138,92,.16);
+  background: var(--bg-start);
   padding:28px 20px;
   display:flex;
   flex-direction:column;
