@@ -2,7 +2,7 @@ import { auth, db } from "./index.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   collection, collectionGroup, getDocs, query, where,
-  doc, getDoc, updateDoc, setDoc, serverTimestamp
+  doc, getDoc, updateDoc, setDoc, serverTimestamp, writeBatch
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 onAuthStateChanged(auth, async user => {
@@ -911,7 +911,6 @@ async function loadKurirFromIndexedDB() {
         </div>`;
     }).join("");
     setupKurirClick(users);
-    setupCustomDropdown(users);
     setupLaporanDropdown(users);
   } catch (err) {
     console.error(err);
@@ -935,47 +934,6 @@ function setupKurirClick(users) {
       await renderReport(uid);
       await renderLaporanTanggalTable(); // FIX: ditambahkan
     });
-  });
-}
-
-function setupCustomDropdown(users) {
-  const wrapper = document.getElementById("laporanUserDropdown");
-  const btn     = document.getElementById("laporanDropdownBtn");
-  const text    = document.getElementById("laporanDropdownText");
-  const list    = document.getElementById("laporanDropdownList");
-  if (!wrapper || !btn || !list) return;
-
-  list.innerHTML = users.map(user => {
-    const nama    = escapeHtml(user.nama || "Tanpa Nama");
-    const role    = escapeHtml(user.role || "-");
-    const inisial = nama.charAt(0).toUpperCase();
-    return `
-      <div class="laporan-dropdown-item" data-uid="${user.uid}">
-        <div class="laporan-dropdown-avatar">${user.foto ? `<img src="${escapeHtml(user.foto)}">` : inisial}</div>
-        <div class="laporan-dropdown-info">
-          <div class="laporan-dropdown-name">${nama}</div>
-          <div class="laporan-dropdown-role">${role}</div>
-        </div>
-      </div>`;
-  }).join("");
-
-  btn.onclick = () => wrapper.classList.toggle("active");
-  document.addEventListener("click", e => { if (!wrapper.contains(e.target)) wrapper.classList.remove("active"); });
-
-  list.querySelectorAll(".laporan-dropdown-item").forEach(item => {
-    item.onclick = async () => {
-      const uid  = item.dataset.uid;
-      const user = users.find(x => x.uid === uid);
-      if (!user) return;
-      selectedKurirUid = uid;
-      text.textContent = user.nama;
-      document.getElementById("laporanRole").value = user.role || "-";
-      list.querySelectorAll(".laporan-dropdown-item").forEach(el => el.classList.remove("active"));
-      item.classList.add("active");
-      wrapper.classList.remove("active");
-      await renderReport(uid);
-      await renderLaporanTanggalTable();
-    };
   });
 }
 
@@ -1528,6 +1486,38 @@ function openPopupKeuangan(tanggal, omset = 0, keteranganTarget = 0, payData = {
       } catch (e) { console.warn(e.code); }
 
       await setDoc(doc(db, "users", selectedKurirUid, "laporanMarketing", tanggal), { distribusi }, { merge: true });
+
+      // Update isNew: false untuk semua customer kurir di hari ini
+      try {
+        const hariNama = ["Minggu","Senin","Selasa","Rabu","Kamis","Jumat","Sabtu"];
+        const tglDate  = new Date(tanggal);
+        const namaHari = hariNama[tglDate.getDay()];
+
+        const kantorCabang = await getKantorCabangFromDB();
+        const idCabang     = kantorCabang?.id || "";
+
+        if (idCabang) {
+          const qSnap = await getDocs(query(
+            collection(db, "customer"),
+            where("idCabang",  "==", idCabang),
+            where("pemilik",   "==", selectedKurirUid),
+            where("hari",      "==", namaHari),
+            where("isNew",     "==", true)
+          ));
+
+          if (!qSnap.empty) {
+            const batch = writeBatch(db);
+            qSnap.forEach(docSnap => {
+              batch.update(docSnap.ref, { isNew: false });
+            });
+            await batch.commit();
+            console.log(`✅ isNew diupdate: ${qSnap.size} customer`);
+          }
+        }
+      } catch (errIsNew) {
+        console.error("Gagal update isNew:", errIsNew);
+      }
+
       btn.classList.add("success");
       btn.textContent = "Berhasil";
     } catch (err) {

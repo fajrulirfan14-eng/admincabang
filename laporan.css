@@ -596,9 +596,8 @@ body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  backdrop-filter: blur(10px);
   border-radius: 36px;
-  background: var(--popup-detail-box-bg);
+  background: var(--bg-start);
   border: 1px solid var(--popup-detail-box-border);
   box-shadow: 0 10px 30px var(--popup-detail-box-shadow);
   transform: translateY(16px) scale(.97);
