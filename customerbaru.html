@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- PWA Meta -->
+<meta name="theme-color" content="#C9A67B">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="TTN Administrasi">
+
+<!-- Icons -->
+<link rel="icon" type="image/png" sizes="32x32" href="icon_32.png">
+<link rel="icon" type="image/png" sizes="48x48" href="icon_48.png">
+<link rel="icon" type="image/png" sizes="512x512" href="icon_512.png">
+<link rel="apple-touch-icon" sizes="512x512" href="icon_512.png">
+
+<!-- Manifest -->
+<link rel="manifest" href="/manifest.json">
+<title>Customer Baru</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+<link rel="stylesheet" href="customerbaru.css"/>
+<link rel="stylesheet" href="navbar.css"/>
+<link rel="stylesheet" href="root.css"/>
+</head>
+<body>
+
+<div class="page">
+
+  <!-- HEADER -->
+  <header class="header">
+    <div class="header-left">
+      <h1>Customer Baru</h1>
+      <div class="header-subtitle">Customer baru dari hunter &amp; rolling pemilik</div>
+    </div>
+    <div class="header-actions">
+      <button id="reloadBtn" class="header-btn" aria-label="Reload">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path d="M21 12a9 9 0 1 1-2.64-6.36"/>
+          <path d="M21 3v6h-6"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- CONTENT -->
+  <main class="content">
+    <div class="content-wrap content-fit">
+
+      <!-- KIRI: List Customer Baru -->
+      <section class="content-left">
+        <section class="cb-card">
+
+          <!-- Filter Bar -->
+          <div class="cb-filter-bar">
+            <div class="cb-search-wrap">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+              </svg>
+              <input id="cbSearchInput" type="text" placeholder="Cari nama customer..." autocomplete="off" class="cb-search-input"/>
+            </div>
+            <div class="cb-filter-chips">
+              <button class="cb-chip cb-chip-active" data-filter="all">Semua</button>
+              <button class="cb-chip" data-filter="unassigned">Belum Assign</button>
+              <button class="cb-chip" data-filter="assigned">Sudah Assign</button>
+            </div>
+          </div>
+
+          <!-- Stats Row -->
+          <div class="cb-stats-row">
+            <div class="cb-stat">
+              <span class="cb-stat-value" id="statTotal">0</span>
+              <span class="cb-stat-label">Total</span>
+            </div>
+            <div class="cb-stat">
+              <span class="cb-stat-value cb-stat-warn" id="statUnassigned">0</span>
+              <span class="cb-stat-label">Belum Assign</span>
+            </div>
+            <div class="cb-stat">
+              <span class="cb-stat-value cb-stat-ok" id="statAssigned">0</span>
+              <span class="cb-stat-label">Sudah Assign</span>
+            </div>
+          </div>
+
+          <!-- List -->
+          <div id="cbList" class="cb-list">
+            <div class="cb-placeholder">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                <circle cx="9" cy="7" r="4"/>
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+              </svg>
+              <div class="cb-placeholder-title">Belum ada customer baru</div>
+              <div class="cb-placeholder-sub">Klik reload untuk memuat data</div>
+            </div>
+          </div>
+
+        </section>
+      </section>
+
+      <!-- KANAN: Detail & Assign -->
+      <aside class="content-right">
+        <div class="cb-aside-card">
+
+          <!-- Aside Header -->
+          <div class="cb-aside-header">
+            <div class="cb-aside-title-row">
+              <span class="cb-aside-title">Detail Customer</span>
+              <span id="cbAsideBadge" class="cb-badge cb-badge-empty">—</span>
+            </div>
+            <div class="cb-aside-subtitle" id="cbAsideSubtitle">Pilih customer dari list untuk melihat detail</div>
+          </div>
+
+          <!-- Aside Body -->
+          <div id="cbAsideBody" class="cb-aside-body">
+
+            <!-- PLACEHOLDER STATE -->
+            <div class="cb-aside-placeholder" id="cbAsidePlaceholder">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"/>
+                <path d="M12 8v4M12 16h.01"/>
+              </svg>
+              <div>Pilih customer dari list</div>
+            </div>
+
+            <!-- DETAIL STATE (hidden by default) -->
+            <div id="cbAsideDetail" style="display:none">
+
+              <!-- Info Customer -->
+              <div class="cb-detail-section">
+                <div class="cb-detail-section-title">Info Customer</div>
+                <div class="cb-detail-grid">
+                  <div class="cb-detail-row">
+                    <span class="cb-detail-key">Nama</span>
+                    <span class="cb-detail-val" id="detailNama">—</span>
+                  </div>
+                  <div class="cb-detail-row">
+                    <span class="cb-detail-key">Alamat</span>
+                    <span class="cb-detail-val" id="detailAlamat">—</span>
+                  </div>
+                  <div class="cb-detail-row">
+                    <span class="cb-detail-key">No. HP</span>
+                    <span class="cb-detail-val" id="detailHp">—</span>
+                  </div>
+                  <div class="cb-detail-row">
+                    <span class="cb-detail-key">Hunter</span>
+                    <span class="cb-detail-val" id="detailHunter">—</span>
+                  </div>
+                  <div class="cb-detail-row">
+                    <span class="cb-detail-key">Tanggal Daftar</span>
+                    <span class="cb-detail-val" id="detailTanggal">—</span>
+                  </div>
+                  <div class="cb-detail-row">
+                    <span class="cb-detail-key">Koordinat</span>
+                    <span class="cb-detail-val" id="detailKoordinat">—</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Rekomendasi Kurir -->
+              <div class="cb-detail-section">
+                <div class="cb-detail-section-title">
+                  Rekomendasi Kurir
+                  <span class="cb-rekomen-hint">Berdasarkan jarak cluster</span>
+                </div>
+                <div id="cbRekomenList" class="cb-rekomen-list">
+                  <div class="cb-rekomen-loading">Menghitung jarak...</div>
+                </div>
+              </div>
+
+              <!-- Form Assign -->
+              <div class="cb-detail-section">
+                <div class="cb-detail-section-title">Assign ke Kurir</div>
+
+                <div class="cb-assign-form">
+                  <div class="cb-assign-group">
+                    <label class="cb-assign-label">Pilih Kurir</label>
+                    <div class="cb-dropdown" id="cbKurirDropdown">
+                      <button type="button" class="cb-dropdown-btn" id="cbKurirBtn">
+                        <span id="cbKurirText">Pilih kurir...</span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 9l6 6 6-6"/></svg>
+                      </button>
+                      <div class="cb-dropdown-list" id="cbKurirList"></div>
+                    </div>
+                    <input type="hidden" id="cbKurirUid">
+                  </div>
+
+                  <div class="cb-assign-group">
+                    <label class="cb-assign-label">Hari Kunjungan</label>
+                    <div class="cb-dropdown" id="cbHariDropdown">
+                      <button type="button" class="cb-dropdown-btn" id="cbHariBtn">
+                        <span id="cbHariText">Pilih hari...</span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 9l6 6 6-6"/></svg>
+                      </button>
+                      <div class="cb-dropdown-list" id="cbHariList">
+                        <div class="cb-dropdown-item" data-value="Senin">Senin</div>
+                        <div class="cb-dropdown-item" data-value="Selasa">Selasa</div>
+                        <div class="cb-dropdown-item" data-value="Rabu">Rabu</div>
+                        <div class="cb-dropdown-item" data-value="Kamis">Kamis</div>
+                        <div class="cb-dropdown-item" data-value="Jumat">Jumat</div>
+                        <div class="cb-dropdown-item" data-value="Sabtu">Sabtu</div>
+                        <div class="cb-dropdown-item" data-value="Minggu">Minggu</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button id="cbAssignBtn" class="cb-assign-btn" disabled>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                      <circle cx="12" cy="7" r="4"/>
+                    </svg>
+                    Assign Kurir
+                  </button>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+        </div>
+      </aside>
+
+    </div>
+  </main>
+
+</div>
+
+<!-- POPUP KONFIRMASI ASSIGN -->
+<div id="cbConfirmOverlay" class="cb-confirm-overlay">
+  <div class="cb-confirm-card">
+    <div class="cb-confirm-title">Konfirmasi Assign</div>
+    <div class="cb-confirm-body" id="cbConfirmBody">
+      Assign customer ke kurir ini?
+    </div>
+    <div class="cb-confirm-actions">
+      <button id="cbConfirmBatal" class="cb-confirm-btn cb-confirm-cancel">Batal</button>
+      <button id="cbConfirmOk" class="cb-confirm-btn cb-confirm-ok">Assign</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div id="cbToast" class="cb-toast"></div>
+
+<nav></nav>
+<script src="navbar.js"></script>
+<script type="module" src="customerbaru.js"></script>
+<div id="devConsoleMount"></div>
+<script src="devconsole.js"></script>
+</body>
+</html>

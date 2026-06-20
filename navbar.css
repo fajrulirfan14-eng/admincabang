@@ -83,6 +83,14 @@ body.nav-open{
   flex-direction:column;
   transition:.35s ease;
   z-index:999;
+  overflow-y:auto;
+  overflow-x:hidden;
+  scrollbar-width:none;
+  -webkit-overflow-scrolling:touch;
+  padding-bottom:80px;
+}
+.nav-drawer::-webkit-scrollbar{
+  display:none;
 }
 .nav-drawer.open{
   right:0;
