@@ -1248,10 +1248,7 @@ async function calculatePembayaran(form) {
     const tanggal = form.querySelector(".popup-date").value;
     if (!tanggal) return;
 
-    // ambil role dari cacheKurirMap untuk tentukan collection
-    const roleKurir = cacheKurirMap[form.dataset.uid]?.role || "kurir";
-    const colLaporan = roleKurir === "hunter" ? "laporanHunter" : roleKurir === "sales" ? "laporanSales" : "laporanMarketing";
-    const laporanSnap = await getDoc(doc(db, "users", form.dataset.uid, colLaporan, tanggal));
+    const laporanSnap = await getDoc(doc(db, "users", form.dataset.uid, "laporanMarketing", tanggal));
     const d = laporanSnap.exists() ? laporanSnap.data() : {};
     const order = d.order || {};
     const fee = d.fee || {};
@@ -1309,9 +1306,7 @@ async function loadPopupPreview(form) {
     if (type === "sisabarang") firestoreField = "sisaBarang";
     let data = {};
     try {
-      const roleKurir = cacheKurirMap[form.dataset.uid]?.role || "kurir";
-      const colLaporan = roleKurir === "hunter" ? "laporanHunter" : roleKurir === "sales" ? "laporanSales" : "laporanMarketing";
-      const snap = await getDoc(doc(db, "users", form.dataset.uid, colLaporan, tanggal));
+      const snap = await getDoc(doc(db, "users", form.dataset.uid, "laporanMarketing", tanggal));
       if (snap.exists()) data = snap.data();
     } catch (err) {
       console.warn("Preview kosong:", err.code);
@@ -1355,18 +1350,7 @@ async function savePopupData(btn) {
     const tanggal = form.querySelector(".popup-date").value;
     if (!tanggal) { alert("Tanggal wajib diisi"); return; }
 
-    // cek role kurir untuk tentukan collection laporan
-    const kurirRoleSnap = await getDoc(doc(db, "users", uidMarketing));
-    const kurirRole = kurirRoleSnap.exists() ? (kurirRoleSnap.data().role || "kurir") : "kurir";
-    const laporanCollection = kurirRole === "hunter"
-      ? "laporanHunter"
-      : kurirRole === "sales"
-      ? "laporanSales"
-      : "laporanMarketing";
-
-    console.log(`📋 Role: ${kurirRole} → collection: ${laporanCollection}`);
-
-    const laporanRef = doc(db, "users", uidMarketing, laporanCollection, tanggal);
+    const laporanRef = doc(db, "users", uidMarketing, "laporanMarketing", tanggal);
 
     // ── Pembayaran ─────────────────────────────────────
     if (type === "pembayaran") {
