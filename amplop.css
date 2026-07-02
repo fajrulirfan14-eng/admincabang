@@ -1,0 +1,209 @@
+/* ── AMPLOP VIEW ── */
+.amplop-page {
+  padding: 16px;
+}
+.amplop-filter {
+  margin-bottom: 14px;
+}
+.amplop-filter-month {
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 14px;
+  background: #fff;
+}
+.amplop-list-empty {
+  text-align: center;
+  color: #999;
+  font-size: 13px;
+  padding: 30px 0;
+}
+
+.amplop-card {
+  background: #fff;
+  border: 1px solid #eee;
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0,0,0,.04);
+}
+.amplop-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.amplop-card-date {
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+}
+.amplop-card-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+.amplop-card-badge.sent {
+  background: #e8f5e9;
+  color: #2f7d32;
+}
+.amplop-card-badge.pending {
+  background: #fff3e0;
+  color: #b26a00;
+}
+.amplop-card-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 0;
+}
+.amplop-card-label {
+  font-size: 13px;
+  color: #666;
+}
+.amplop-card-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+}
+
+/* Detail popup — sama pola dengan rumus-panel */
+.amplop-detail-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.4);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity .25s ease;
+  z-index: 999;
+}
+.amplop-detail-overlay.show {
+  opacity: 1;
+  visibility: visible;
+}
+.amplop-detail-panel {
+  position: fixed;
+  background: #fff;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 -4px 20px rgba(0,0,0,.15);
+  transition: transform .3s ease;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-height: 80vh;
+  border-radius: 16px 16px 0 0;
+  transform: translateY(100%);
+}
+.amplop-detail-panel.show {
+  transform: translateY(0);
+}
+..amplop-detail-handle {
+  width: 40px;
+  height: 4px;
+  background: #ddd;
+  border-radius: 2px;
+  margin: 8px auto;
+  touch-action: none;
+}
+@media (min-width: 769px) {
+  .amplop-detail-panel {
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: auto;
+    width: 420px;
+    max-height: 100vh;
+    border-radius: 16px 0 0 16px;
+    box-shadow: -4px 0 20px rgba(0,0,0,.15);
+    transform: translateX(100%);
+  }
+  .amplop-detail-panel.show {
+    transform: translateX(0);
+  }
+  .amplop-detail-handle {
+    display: none;
+  }
+}
+.amplop-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px 12px;
+  border-bottom: 1px solid #eee;
+  touch-action: none;
+  cursor: grab;
+}
+.amplop-detail-title {
+  font-weight: 600;
+  font-size: 16px;
+}
+.amplop-detail-close {
+  border: none;
+  background: none;
+  font-size: 18px;
+  color: #888;
+  cursor: pointer;
+}
+.amplop-detail-body {
+  padding: 16px;
+  overflow-y: auto;
+  flex: 1;
+}
+.amplop-detail-section-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #7a5a00;
+  background: #fff7e6;
+  padding: 8px 10px;
+  border-radius: 8px;
+  margin: 16px 0 8px;
+}
+.amplop-detail-section-title:first-child {
+  margin-top: 0;
+}
+.amplop-detail-subtitle {
+  font-size: 11px;
+  font-weight: 600;
+  color: #999;
+  text-transform: uppercase;
+  margin: 10px 0 6px;
+}
+.amplop-detail-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px solid #f0f0f0;
+  font-size: 13px;
+}
+.amplop-detail-row .label {
+  color: #666;
+}
+.amplop-detail-row .value {
+  font-weight: 600;
+  color: #333;
+}
+.amplop-detail-total {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #f5f5f5;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 8px;
+  font-weight: 700;
+}
+.amplop-detail-catatan {
+  background: #f9f9f9;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: #333;
+  margin-top: 16px;
+  white-space: pre-wrap;
+}

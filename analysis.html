@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Central Analytics Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<link rel="stylesheet" href="analysis.css">
+<link rel="stylesheet" href="navbar.css">
+<link rel="stylesheet" href="root.css">
+
+</head>
+<body>
+<div class="page">
+<!-- ===== HEADER ===== -->
+<header class="dashboard-header">
+  <div class="header-inner">
+    <div class="header-top">
+      <h1 class="header-title">Central Analytics Dashboard</h1>
+      <div class="header-datetime">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <span id="realtime-clock">Memuat...</span>
+      </div>
+    </div>
+    <div class="header-filters">
+      <button class="period-btn" data-period="today">Hari Ini</button>
+      <button class="period-btn" data-period="week">Minggu Ini</button>
+      <button class="period-btn active" data-period="month">Bulan Ini</button>
+      <button class="period-btn" data-period="year">Tahun Ini</button>
+      <button class="custom-range-btn">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+        </svg>
+        Custom Range
+      </button>
+    </div>
+  </div>
+</header>
+
+<!-- ===== MAIN ===== -->
+<main class="main-container">
+
+  <!-- ===== EXECUTIVE KPI CARDS ===== -->
+  <section class="section animate-in" style="animation-delay:0.1s;">
+    <div class="kpi-grid" id="kpi-grid"></div>
+  </section>
+
+  <!-- ===== REVENUE ANALYTICS ===== -->
+  <section class="section animate-in" style="animation-delay:0.2s;">
+    <div class="chart-card">
+      <div class="chart-header">
+        <div>
+          <h3 class="chart-title">Revenue Trend</h3>
+          <span class="section-subtitle">12 Bulan Terakhir</span>
+        </div>
+      </div>
+      <div class="chart-container">
+        <canvas id="revenueChart"></canvas>
+      </div>
+      <div class="chart-legend">
+        <div class="legend-item"><span class="legend-dot" style="background:#b18b63;"></span>Revenue</div>
+        <div class="legend-item"><span class="legend-dot" style="background:#2ecc71;"></span>Profit</div>
+        <div class="legend-item"><span class="legend-dot" style="background:#e74c3c;"></span>Target</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== SALES PERFORMANCE & HUNTER PERFORMANCE ===== -->
+  <div class="two-col">
+    <section class="section animate-in" style="animation-delay:0.3s;">
+      <div class="section-header">
+        <h3 class="section-title">Top Sales Performance</h3>
+      </div>
+      <div class="table-card">
+        <div style="overflow-x:auto;">
+          <table class="data-table" id="sales-table">
+            <thead>
+              <tr><th>Rank</th><th>Nama</th><th>Cabang</th><th>Order</th><th>Revenue</th><th>Profit</th><th>Achievement</th></tr>
+            </thead>
+            <tbody id="sales-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="section animate-in" style="animation-delay:0.35s;">
+      <div class="section-header">
+        <h3 class="section-title">Top Hunter Performance</h3>
+      </div>
+      <div class="hunter-grid" id="hunter-grid"></div>
+    </section>
+  </div>
+
+  <!-- ===== BRANCH PERFORMANCE & CUSTOMER ANALYTICS ===== -->
+  <div class="two-col">
+    <section class="section animate-in" style="animation-delay:0.4s;">
+      <div class="chart-card">
+        <div class="chart-header">
+          <div>
+            <h3 class="chart-title">Branch Performance</h3>
+            <span class="section-subtitle">Top Cabang Berdasarkan Revenue</span>
+          </div>
+        </div>
+        <div class="chart-container chart-container-sm">
+          <canvas id="branchChart"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <section class="section animate-in" style="animation-delay:0.45s;">
+      <div class="chart-card">
+        <div class="chart-header">
+          <div>
+            <h3 class="chart-title">Customer Composition</h3>
+            <span class="section-subtitle">Distribusi Tipe Customer</span>
+          </div>
+        </div>
+        <div class="chart-container chart-container-sm">
+          <canvas id="customerChart"></canvas>
+        </div>
+        <div class="customer-stats" id="customer-stats"></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ===== ORDER ANALYTICS ===== -->
+  <section class="section animate-in" style="animation-delay:0.5s;">
+    <div class="chart-card">
+      <div class="chart-header">
+        <div>
+          <h3 class="chart-title">Order Analytics</h3>
+          <span class="section-subtitle">Status Order & Trend</span>
+        </div>
+      </div>
+      <div class="order-stats-row" id="order-stats"></div>
+      <div class="two-col">
+        <div class="chart-container chart-container-sm">
+          <canvas id="orderPieChart"></canvas>
+        </div>
+        <div class="chart-container chart-container-sm">
+          <canvas id="orderTrendChart"></canvas>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== DELIVERY PERFORMANCE ===== -->
+  <section class="section animate-in" style="animation-delay:0.55s;">
+    <div class="chart-card">
+      <div class="chart-header">
+        <div>
+          <h3 class="chart-title">Delivery Performance</h3>
+          <span class="section-subtitle">KPI Kurir Mingguan</span>
+        </div>
+      </div>
+      <div class="delivery-stats" id="delivery-stats"></div>
+      <div class="chart-container">
+        <canvas id="deliveryChart"></canvas>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== COLLECTION ANALYTICS ===== -->
+  <section class="section animate-in" style="animation-delay:0.6s;">
+    <div class="chart-card">
+      <div class="chart-header">
+        <div>
+          <h3 class="chart-title">Collection Analytics</h3>
+          <span class="section-subtitle">Monitoring Piutang & Aging Bucket</span>
+        </div>
+      </div>
+      <div class="chart-container chart-container-sm">
+        <canvas id="collectionChart"></canvas>
+      </div>
+      <div class="aging-grid" id="aging-grid"></div>
+    </div>
+  </section>
+
+  <!-- ===== PRODUCT ANALYTICS ===== -->
+  <section class="section animate-in" style="animation-delay:0.65s;">
+    <div class="section-header">
+      <h3 class="section-title">Top Product Performance</h3>
+    </div>
+    <div class="table-card">
+      <div style="overflow-x:auto;">
+        <table class="data-table" id="product-table">
+          <thead>
+            <tr><th>Rank</th><th>Produk</th><th>Kategori</th><th>Qty</th><th>Revenue</th><th>Profit</th><th>Margin</th></tr>
+          </thead>
+          <tbody id="product-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== REGIONAL MAP ===== -->
+  <section class="section animate-in" style="animation-delay:0.7s;">
+    <div class="section-header">
+      <h3 class="section-title">Regional Performance</h3>
+    </div>
+    <div class="region-grid" id="region-grid"></div>
+  </section>
+
+  <!-- ===== FINANCIAL HEALTH ===== -->
+  <section class="section animate-in" style="animation-delay:0.75s;">
+    <div class="section-header">
+      <h3 class="section-title">Financial Health</h3>
+    </div>
+    <div class="gauge-grid" id="gauge-grid"></div>
+  </section>
+
+  <!-- ===== ALERT CENTER ===== -->
+  <section class="section animate-in" style="animation-delay:0.8s;">
+    <div class="section-header">
+      <h3 class="section-title">Alert Center</h3>
+    </div>
+    <div class="alert-grid" id="alert-grid"></div>
+  </section>
+
+  <!-- ===== AI INSIGHT ===== -->
+  <section class="section animate-in" style="animation-delay:0.85s;">
+    <div class="insight-card">
+      <div class="insight-header">
+        <div class="insight-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z" />
+          </svg>
+        </div>
+        <div>
+          <h3 class="insight-title">AI Executive Summary</h3>
+          <p class="insight-subtitle">Generated automatically based on current data</p>
+        </div>
+      </div>
+      <div class="insight-body" id="insight-body"></div>
+    </div>
+  </section>
+
+</main>
+</div>
+<nav></nav>
+
+<script src="navbar.js"></script>
+<script type="module" src="analysis.js"></script>
+
+<div id="devConsoleMount"></div>
+<script src="devconsole.js"></script>
+
+</body>
+</html>

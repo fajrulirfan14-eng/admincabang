@@ -1,2728 +1,977 @@
-import { db, auth } from "./index.js";
-import {
-  collection, collectionGroup, query, where,
-  getDocs, doc, getDoc, setDoc, updateDoc,
-  serverTimestamp, deleteField,
-  Timestamp, increment
-} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-
-const toggleCostBtn = document.getElementById("toggleCostBtn");
-const fixSection = document.getElementById("fixCostSection");
-const marginalSection = document.getElementById("marginalCostSection");
-const kasbonCostBtn = document.getElementById("kasbonCostBtn");
-const btnSimpanPengeluaran = document.getElementById("btnSimpanPengeluaran");
-const toggleLainnyaBtn = document.getElementById("toggleLainnya");
-const lainnyaWrap = document.getElementById("lainnyaWrap");
-const listWrap = document.getElementById("lainnyaList");
-const fixWrap = document.getElementById("fixCostWrap");
-
-// ── Cache ──────────────────────────────────────────────
-const CACHE_TTL = 5 * 60 * 1000;
-const cacheDataHarian = {};
-const CACHE_KANTOR_TTL = 5 * 60 * 1000;
-const cacheLaporanAdmin = {};
-
-const DB_VERSION = 2;
-const DB_NAME = "appAdminCabangDB";
-const STORE_DATA_HARIAN = "dataHarian";
-const STORE_PENGELUARAN = "pengeluaranProduksi";
-const STORE_LAPORAN = "laporanAdmin";
-
-const DB_VERSION_PENGELUARAN = 3;
-const DB_NAME_USERS = "laporanDistribusiDB";
-const STORE_USERS = "users";
-
-const STORAGE_FILTER_KEY = "laporanFilter";
-const bulanNama = ["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
-
-let cacheVarian = null;
-const cacheKurirMap = {};
-let cacheUpdatedAt = null;
-let cacheKantorCabang = null;
-let cacheKantorCabangUpdatedAt = null;
-let costHidden = true;
-let selectedMonth = new Date().getMonth();
-let selectedYear = new Date().getFullYear();
-let laporanFilter = localStorage.getItem(STORAGE_FILTER_KEY) || "all";
-let dbIndexed = null;
-
-// ── Auth Ready ─────────────────────────────────────────
-// Tampilkan skeleton saat halaman load
-(function showKurirSkeleton() {
-  const listEl = document.getElementById("listKurir");
-  if (!listEl) return;
-  listEl.innerHTML = Array.from({ length: 4 }).map(() => `
-    <div class="kurir-skeleton">
-      <div class="ks-avatar sk-pulse"></div>
-      <div class="ks-info">
-        <div class="ks-name sk-pulse"></div>
-        <div class="ks-role sk-pulse"></div>
-      </div>
-      <div class="ks-actions">
-        <div class="ks-btn sk-pulse"></div>
-        <div class="ks-btn sk-pulse"></div>
-        <div class="ks-btn sk-pulse"></div>
-      </div>
-    </div>
-  `).join('');
-})();
-
-onAuthStateChanged(auth, async user => {
-  if (!user) {
-    const listEl = document.getElementById("listKurir");
-    if (listEl) listEl.innerHTML = `<div class="loading-card">Belum login</div>`;
-    return;
-  }
-  const adminSnap = await getDoc(doc(db, "users", user.uid));
-  if (!adminSnap.exists()) {
-    console.log("⚠️ admin tidak ditemukan");
-    return;
-  }
-  const adminData = adminSnap.data();
-  const idCabang = adminData.idCabang;
-  // ── INI LOAD KANTOR CABANG ──
-  const kantorCabang = await loadKantorCabang(idCabang);
-  renderPengeluaranVariable(kantorCabang);
-  renderFixCost(kantorCabang);
-  renderMarginalCost();
-  await loadPengeluaranProduksiDraft();
-  updatePeriodTitle();
-  restoreFilterUI();
-  renderLaporanHarian();
-  loadKurir();
-});
-
-async function loadKantorCabang(idCabang, forceReload = false) {
-  const now = Date.now();
-  // ── RAM HIT ──
-  if (
-    !forceReload &&
-    cacheKantorCabang &&
-    cacheKantorCabangUpdatedAt &&
-    (now - cacheKantorCabangUpdatedAt < CACHE_KANTOR_TTL)
-  ) {
-    console.log("⚡ KANTOR CABANG RAM HIT:", idCabang);
-    return cacheKantorCabang;
-  }
-  try {
-    const snap = await getDoc(doc(db, "kantorCabang", idCabang));
-    if (!snap.exists()) {
-      console.log("⚠️ KANTOR CABANG TIDAK ADA:", idCabang);
-      return null;
-    }
-    const data = snap.data();
-    cacheKantorCabang = data;
-    cacheKantorCabangUpdatedAt = now;
-    return data;
-  } catch (err) {
-    console.error("❌ gagal load kantorCabang:", err);
-    return null;
-  }
-}
-async function updateRincianPengeluaranSync(uid) {
-  try {
-    const ref = doc(db, "users", uid);
-
-    await setDoc(ref, {
-      rincianPengeluaranSync: {
-        version: increment(1),
-        updatedAt: serverTimestamp()
-      }
-    }, { merge: true });
-
-    // ambil version terbaru dari Firestore setelah update
-    const snap = await getDoc(ref);
-    const data = snap.data();
-
-    const syncData = {
-      version: data?.rincianPengeluaranSync?.version || 0,
-      updatedAt: Date.now()
-    };
-
-    await updateUserSyncToIDB(uid, syncData);
-
-    console.log("🔄 sync Firestore + IndexedDB USERS updated");
-
-  } catch (err) {
-    console.error("❌ updateRincianPengeluaranSync error:", err);
-  }
-}
-
-function openLocalDB() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION_PENGELUARAN);
-    req.onupgradeneeded = e => {
-      const db = e.target.result;
-      if (!db.objectStoreNames.contains(STORE_PENGELUARAN)) {
-        db.createObjectStore(STORE_PENGELUARAN, { keyPath: "tanggal" });
-        console.log("✅ Store pengeluaranProduksi dibuat");
-      }
-      if (!db.objectStoreNames.contains(STORE_LAPORAN)) {
-        db.createObjectStore(STORE_LAPORAN, { keyPath: "id" })
-          .createIndex("tanggal", "tanggal", { unique: false });
-      }
-      if (!db.objectStoreNames.contains(STORE_DATA_HARIAN)) {
-        db.createObjectStore(STORE_DATA_HARIAN, { keyPath: "id" });
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror  = () => reject(req.error);
-  });
-}
-function openLocalDBUsers() {
-  return new Promise((resolve, reject) => {
-    const checkReq = indexedDB.open(DB_NAME_USERS);
-
-    checkReq.onsuccess = (e) => {
-      const existingDB     = e.target.result;
-      const currentVersion = existingDB.version;
-      const needsUpgrade   = !existingDB.objectStoreNames.contains(STORE_USERS) ||
-                             !existingDB.objectStoreNames.contains("laporanAdmin");
-
-      existingDB.close();
-
-      const targetVersion = needsUpgrade ? currentVersion + 1 : currentVersion;
-      const req = indexedDB.open(DB_NAME_USERS, targetVersion);
-
-      req.onupgradeneeded = (ev) => {
-        const dbUp = ev.target.result;
-
-        if (!dbUp.objectStoreNames.contains(STORE_USERS)) {
-          dbUp.createObjectStore(STORE_USERS, { keyPath: "uid" });
-          console.log("✅ STORE USERS dibuat");
-        }
-
-        if (!dbUp.objectStoreNames.contains("laporanAdmin")) {
-          dbUp.createObjectStore("laporanAdmin", { keyPath: "tanggal" });
-          console.log("✅ STORE laporanAdmin dibuat");
-        }
-      };
-
-      req.onsuccess = () => resolve(req.result);
-      req.onerror   = () => reject(req.error);
-    };
-
-    checkReq.onerror = () => reject(checkReq.error);
-  });
-}
-async function updateUserSyncToIDB(uid, syncData) {
-  try {
-    const db = await openLocalDBUsers();
-
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_USERS, "readwrite");
-      const store = tx.objectStore(STORE_USERS);
-
-      const getReq = store.get(uid);
-
-      getReq.onsuccess = () => {
-        const user = getReq.result || { uid };
-
-        user.rincianPengeluaranSync = {
-          version: syncData.version || 0,
-          updatedAt: syncData.updatedAt || Date.now()
-        };
-
-        store.put(user);
-      };
-
-      getReq.onerror = () => reject(getReq.error);
-
-      tx.oncomplete = () => {
-        console.log("💾 IndexedDB USERS sync updated:", uid);
-        resolve();
-      };
-
-      tx.onerror = () => reject(tx.error);
-    });
-
-  } catch (err) {
-    console.error("❌ updateUserSyncToIDB error:", err);
-  }
-}
-async function savePengeluaranIndexedDB(data) {
-  try {
-    const db = await openLocalDB();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(
-        STORE_PENGELUARAN,
-        "readwrite"
-      );
-
-      tx.objectStore(STORE_PENGELUARAN).put(data);
-      tx.oncomplete = () => {
-        console.log("💾 IndexedDB saved:", data.tanggal);
-        resolve();
-      };
-      tx.onerror = () => reject(tx.error);
-    });
-  } catch (err) {
-    console.error("❌ save indexeddb:", err);
-  }
-}
-async function getPengeluaranIndexedDB(tanggal) {
-  try {
-    const db = await openLocalDB();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_PENGELUARAN, "readonly");
-      const req = tx.objectStore(STORE_PENGELUARAN).get(tanggal);
-      req.onsuccess = () => {
-        resolve(req.result || null);
-      };
-      req.onerror = () => reject(req.error);
-    });
-  } catch (err) {
-    console.error(err);
-    return null;
-  }
-}
-async function getKasbonByTanggalUser(tanggal, uid) {
-  try {
-    // Pakai loadKasbonDraft supaya ada fallback Firestore
-    const kasbon = await loadKasbonDraft(tanggal);
-
-    const found = Object.entries(kasbon)
-      .find(([id, item]) =>
-        item.uid === uid &&
-        item.tanggal === tanggal
-      );
-
-    if (!found) return null;
-
-    return {
-      id: found[0],
-      data: found[1]
-    };
-
-  } catch (err) {
-    console.error("❌ getKasbonByTanggalUser:", err);
-    return null;
-  }
-}
-function renderPengeluaranVariable(kantorCabang) {
-  const container = document.getElementById("variableExpenseWrap");
-  if (!container) return;
-  const list = kantorCabang?.pengeluaran?.variable || [];
-
-  // Hapus hanya variable rows lama, jangan replace innerHTML
-  container.querySelectorAll(".variable-row").forEach(el => el.remove());
-
-  const fragment = document.createDocumentFragment();
-  list.forEach((item, index) => {
-    const div = document.createElement("div");
-    div.className = "expense-row variable-row";
-    div.dataset.index = index;
-    div.dataset.harga = item.harga;
-    div.innerHTML = `
-      <div class="expense-label">${item.jenis}</div>
-      <input type="number" min="0" placeholder="0" class="qty-input variable-qty">
-      <input type="text" readonly placeholder="0" class="harga-input variable-total">
-    `;
-    fragment.appendChild(div);
-  });
-
-  // Insert sebelum elemen pertama yang ada di container
-  container.insertBefore(fragment, container.firstChild);
-}
-// Hitung otomatis variable cost
-document.addEventListener("input", e => {
-  if (!e.target.classList.contains("variable-qty")) return;
-  const row = e.target.closest(".variable-row");
-  if (!row) return;
-  const harga = Number(row.dataset.harga || 0);
-  const qty   = Number(e.target.value || 0);
-  const totalEl = row.querySelector(".variable-total");
-  if (totalEl) totalEl.value = (qty * harga).toLocaleString("id-ID");
-});
-toggleLainnyaBtn?.addEventListener("click", () => {
-  lainnyaWrap.classList.add("show");
-  addLainnyaRow();
-});
-function addLainnyaRow() {
-  const row = document.createElement("div");
-  row.className = "lainnya-row";
-  row.innerHTML = `
-    <input type="text" placeholder="Jenis" class="lainnya-jenis">
-    <input type="number" placeholder="Qty" class="lainnya-qty">
-    <input type="number" placeholder="Harga" class="lainnya-harga">
-    <button type="button" class="btn-remove">X</button>
-  `;
-  row.querySelector(".btn-remove").addEventListener("click", () => {
-    row.remove();
-  });
-  listWrap.appendChild(row);
-}
-
-/* FIX COST RENDER (DARI RAM KANTOR CABANG) */
-function renderFixCost(kantorCabang) {
-  const list = kantorCabang?.pengeluaran?.fix || [];
-  const html = list.map((item) => `
-    <div class="fix-row">
-      <div class="fix-label">${item}</div>
-      <input type="text" placeholder="0" class="fix-input">
-    </div>
-  `).join("");
-  fixWrap.innerHTML = html;
-}
-document.addEventListener("input", (e) => {
-  if (!e.target.classList.contains("fix-input")) return;
-  let value = e.target.value;
-  value = formatRibuan(value);
-  e.target.value = value;
-});
-
-function renderMarginalCost() {
-  const container = document.getElementById("marginalCostWrap");
-  if (!container) return;
-
-  container.innerHTML = `
-    <div id="marginalList"></div>
-
-    <button type="button" id="btnTambahMarginal" class="btn-lainnya">
-      + Tambah Alat Baru
-    </button>
-  `;
-
-  document.getElementById("btnTambahMarginal")
-    .addEventListener("click", addMarginalRow);
-
-  addMarginalRow(); // default 1 row
-}
-function addMarginalRow() {
-  const list = document.getElementById("marginalList");
-
-  const row = document.createElement("div");
-  row.className = "lainnya-row"; // pakai style yang sama
-
-  row.innerHTML = `
-    <input type="text" placeholder="Alat baru" class="marginal-nama">
-    <input type="number" placeholder="Qty" class="marginal-qty">
-    <input type="number" placeholder="Harga" class="marginal-harga">
-    <button type="button" class="btn-remove">X</button>
-  `;
-
-  row.querySelector(".btn-remove").addEventListener("click", () => {
-    row.remove();
-  });
-
-  list.appendChild(row);
-}
-function getMarginalCostData() {
-  const result = [];
-  document.querySelectorAll("#marginalList .lainnya-row").forEach(row => {
-    const nama = row.querySelector(".marginal-nama")?.value || "";
-    const qty = Number(row.querySelector(".marginal-qty")?.value || 0);
-    const harga = Number(row.querySelector(".marginal-harga")?.value || 0);
-
-    if (nama || qty || harga) {
-      result.push({
-        nama,
-        qty,
-        harga,
-        total: qty * harga
-      });
-    }
-  });
-
-  return result;
-}
-async function savePengeluaranProduksi(e) {
-  const btn = e?.target || btnSimpanPengeluaran;
-  if (!btn) return;
-  const originalText = "Simpan";
-  try {
-    // ── BUTTON LOADING ─────────────────────
-    btn.disabled = true;
-    btn.innerHTML = "Menyimpan...";
-    const user = auth.currentUser;
-    if (!user) throw new Error("Belum login");
-    const today = getTanggalLocal();
-    const adminSnap = await getDoc(doc(db, "users", user.uid));
-    if (!adminSnap.exists()) {
-      throw new Error("Admin tidak ditemukan");
-    }
-
-    const adminData = adminSnap.data();
-    const idCabang = adminData.idCabang || "";
-    const variableCost = {};
-    document.querySelectorAll(".variable-row").forEach(row => {
-      const label = row.querySelector(".expense-label")?.innerText?.trim() || "";
-      const qty = Number(row.querySelector(".variable-qty")?.value || 0);
-      const harga = Number(row.dataset.harga || 0);
-      const total = qty * harga;
-
-      if (qty > 0) {
-        variableCost[label] = {
-          qty,
-          harga,
-          total
-        };
-      }
-    });
-    document.querySelectorAll("#lainnyaList .lainnya-row")
-      .forEach(row => {
-        const jenis =
-          row.querySelector(".lainnya-jenis")?.value?.trim() || "";
-        const qty = Number(row.querySelector(".lainnya-qty")?.value || 0);
-
-        const harga = Number(row.querySelector(".lainnya-harga")?.value || 0);
-        if (jenis || qty || harga) {
-          variableCost[jenis || "lainnya"] = {
-            qty,
-            harga,
-            total: qty * harga
-          };
-        }
-      });
-    const fixCost = {};
-    document.querySelectorAll(".fix-row")
-      .forEach(row => {
-        const label =
-          row.querySelector(".fix-label")
-            ?.innerText?.trim() || "";
-        const nominal = parseRibuan(row.querySelector(".fix-input")?.value || 0);
-        if (nominal > 0) {
-          fixCost[label] = nominal;
-        }
-      });
-    const marginalCost = {};
-    getMarginalCostData().forEach(item => {
-      if (!item.nama) return;
-      marginalCost[item.nama] = {
-        qty: item.qty,
-        harga: item.harga,
-        total: item.total
-      };
-    });
-    const laporanRef = doc(db, "users", user.uid, "laporanAdmin", today);
-    await setDoc(laporanRef, {
-      createdBy: user.uid,
-      idCabang,
-      tanggal: today,
-      updatedAt: serverTimestamp(),
-      pengeluaranProduksi: {
-        variableCost,
-        fixCost,
-        marginalCost
-      }
-    }, { merge: true });
-    await updateRincianPengeluaranSync(user.uid);
-    await savePengeluaranIndexedDB({
-      tanggal: today,
-      pengeluaranProduksi: {
-        variableCost,
-        fixCost,
-        marginalCost
-      },
-      updatedAt: Date.now()
-    });
-    console.log("✅ pengeluaranProduksi tersimpan");
-    btn.innerHTML = "✔ Tersimpan";
-    setTimeout(() => {
-      btn.innerHTML = originalText;
-      btn.disabled = false;
-    }, 2000);
-  } catch (err) {
-    console.error("❌ savePengeluaranProduksi:", err);
-    btn.innerHTML = "❌ Gagal";
-    setTimeout(() => {
-      btn.innerHTML = originalText;
-      btn.disabled = false;
-    }, 2000);
-  }
-}
-async function loadPengeluaranProduksiDraft() {
-  try {
-    const today = getTanggalLocal();
-    let data = null;
-    
-    // 1. Coba IndexedDB dulu
-    const localData = await getPengeluaranIndexedDB(today);
-    if (localData?.pengeluaranProduksi) {
-      data = localData.pengeluaranProduksi;
-    } else {
-      try {
-        const user = auth.currentUser;
-        if (!user) return;
-        const snap = await getDoc(doc(db, "users", user.uid, "laporanAdmin", today));
-        if (snap.exists() && snap.data()?.pengeluaranProduksi) {
-          data = snap.data().pengeluaranProduksi;
-          await savePengeluaranIndexedDB({
-            tanggal: today,
-            pengeluaranProduksi: data,
-            updatedAt: Date.now()
-          });
-        } else {
-          return;
-        }
-      } catch (err) {
-        console.error("❌ Gagal load Firestore:", err);
-        return;
-      }
-    }
-    
-    document.querySelectorAll(".variable-row").forEach(row => {
-      const label = row.querySelector(".expense-label")?.innerText?.trim();
-      const item = data.variableCost?.[label];
-      if (!item) return;
-      const qtyInput = row.querySelector(".variable-qty");
-      const totalInput = row.querySelector(".variable-total");
-      qtyInput.value = item.qty || 0;
-      totalInput.value = formatRibuan(item.total || 0);
-    });
-    document.querySelectorAll(".fix-row").forEach(row => {
-      const label = row.querySelector(".fix-label")?.innerText?.trim();
-      const nominal = data.fixCost?.[label];
-      if (!nominal) return;
-      row.querySelector(".fix-input")
-        .value = formatRibuan(nominal);
-    });
-    const marginalList = document.getElementById("marginalList");
-    if (marginalList && data.marginalCost) {
-      marginalList.innerHTML = "";
-      Object.entries(
-        data.marginalCost
-      ).forEach(([nama, item]) => {
-        addMarginalRow();
-        const row = marginalList.lastElementChild;
-        row.querySelector(".marginal-nama").value = nama;
-        row.querySelector(".marginal-qty").value = item.qty || 0;
-        row.querySelector(".marginal-harga").value = item.harga || 0;
-      });
-    }
-    const defaultVariable = Array.from(document.querySelectorAll(".expense-label")).map(el => el.innerText.trim());
-    Object.entries(data.variableCost || {}).forEach(([jenis, item]) => {
-      if (defaultVariable.includes(jenis)) return;
-      addLainnyaRow();
-      const row = listWrap.lastElementChild;
-      row.querySelector(".lainnya-jenis").value = jenis;
-      row.querySelector(".lainnya-qty").value = item.qty || 0;
-      row.querySelector(".lainnya-harga").value = item.harga || 0;
-      lainnyaWrap ?.classList.add("show");
-    });
-  } catch (err) {
-    console.error("❌ load draft:", err);
-  }
-}
-// ICON SVG
-const eyeOn = `
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="size-6">
-  <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
-  <path fill-rule="evenodd" d="M1.323 11.447C2.811 6.976 7.028 3.75 12.001 3.75c4.97 0 9.185 3.223 10.675 7.69.12.362.12.752 0 1.113-1.487 4.471-5.705 7.697-10.677 7.697-4.97 0-9.186-3.223-10.675-7.69a1.762 1.762 0 0 1 0-1.113ZM17.25 12a5.25 5.25 0 1 1-10.5 0 5.25 5.25 0 0 1 10.5 0Z" clip-rule="evenodd" />
-</svg>
-`;
-const eyeOff = `
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="size-6">
-  <path d="M3.53 2.47a.75.75 0 0 0-1.06 1.06l18 18a.75.75 0 1 0 1.06-1.06l-18-18ZM22.676 12.553a11.249 11.249 0 0 1-2.631 4.31l-3.099-3.099a5.25 5.25 0 0 0-6.71-6.71L7.759 4.577a11.217 11.217 0 0 1 4.242-.827c4.97 0 9.185 3.223 10.675 7.69.12.362.12.752 0 1.113Z" />
-  <path d="M15.75 12c0 .18-.013.357-.037.53l-4.244-4.243A3.75 3.75 0 0 1 15.75 12ZM12.53 15.713l-4.243-4.244a3.75 3.75 0 0 0 4.244 4.243Z" />
-  <path d="M6.75 12c0-.619.107-1.213.304-1.764l-3.1-3.1a11.25 11.25 0 0 0-2.63 4.31c-.12.362-.12.752 0 1.114 1.489 4.467 5.704 7.69 10.675 7.69 1.5 0 2.933-.294 4.242-.827l-2.477-2.477A5.25 5.25 0 0 1 6.75 12Z" />
-</svg>
-
-`;
-const kasbonIcon = `
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="size-6">
-  <path d="M4.5 3.75a3 3 0 0 0-3 3v.75h21v-.75a3 3 0 0 0-3-3h-15Z" />
-  <path fill-rule="evenodd" d="M22.5 9.75h-21v7.5a3 3 0 0 0 3 3h15a3 3 0 0 0 3-3v-7.5Zm-18 3.75a.75.75 0 0 1 .75-.75h6a.75.75 0 0 1 0 1.5h-6a.75.75 0 0 1-.75-.75Zm.75 2.25a.75.75 0 0 0 0 1.5h3a.75.75 0 0 0 0-1.5h-3Z" clip-rule="evenodd" />
-</svg>
-`;
-if (kasbonCostBtn) {
-  kasbonCostBtn.innerHTML = kasbonIcon;
-}
-fixSection?.classList.add("hidden-section");
-marginalSection?.classList.add("hidden-section");
-if (toggleCostBtn) {
-  toggleCostBtn.innerHTML = eyeOff;
-}
-costHidden = true;
-fixSection?.classList.add("hidden");
-marginalSection?.classList.add("hidden");
-if (toggleCostBtn) {
-  toggleCostBtn.innerHTML = eyeOff;
-}
-toggleCostBtn?.addEventListener("click", () => {
-  costHidden = !costHidden;
-  if (costHidden) {
-    fixSection?.classList.add("hidden");
-    marginalSection?.classList.add("hidden");
-    toggleCostBtn.innerHTML = eyeOff;
-  } else {
-    fixSection?.classList.remove("hidden");
-    marginalSection?.classList.remove("hidden");
-    toggleCostBtn.innerHTML = eyeOn;
-  }
-});
-btnSimpanPengeluaran?.addEventListener(
-  "click",
-  savePengeluaranProduksi
-);
-kasbonCostBtn?.addEventListener("click", async () => {
-  const today = getTanggalLocal();
-  const users = await loadKasbonUsers();
-
-  openPopup("Kasbon Produksi", `
-    <div class="kasbon-form">
-      <label>Tanggal</label>
-      <input type="date" class="kasbon-tanggal" value="${today}">
-
-      <label>Nama</label>
-      <div class="kasbon-dropdown">
-        <div class="kasbon-dropdown-selected" tabindex="0">
-          -- Pilih Nama --
-        </div>
-        <div class="kasbon-dropdown-list"></div>
-        <input type="hidden" class="kasbon-nama">
-      </div>
-
-      <label>Nominal</label>
-      <input type="text" class="kasbon-nominal" placeholder="Rp 0" inputmode="numeric">
-
-      <label>Keterangan</label>
-      <textarea class="kasbon-keterangan" rows="4"></textarea>
-
-      <button class="kasbon-save-btn">
-        Simpan Kasbon
-      </button>
-
-    </div>
-  `);
-
-  setTimeout(() => {
-    initKasbonDropdown(users);
-    const input = document.querySelector(".kasbon-nominal");
-    const tanggalInput = document.querySelector(
-        ".kasbon-tanggal"
-      );
-    tanggalInput?.addEventListener("change", async () => {
-        const form = document.querySelector(".kasbon-form");
-        const uid = form?.querySelector(".kasbon-nama")?.value;
-        if (!uid) return;
-        const tanggal = tanggalInput.value;
-        const kasbon = await getKasbonByTanggalUser(tanggal, uid);
-        const nominalInput = form.querySelector(".kasbon-nominal");
-        const ketInput = form.querySelector(".kasbon-keterangan");
-        const saveBtn = form.querySelector(".kasbon-save-btn");
-        if (kasbon) {
-          nominalInput.value = formatRibuan(kasbon.data.nominal || 0);
-          ketInput.value = kasbon.data.keterangan || "";
-          form.dataset.kasbonId = kasbon.id;
-          saveBtn.innerText = "Update Kasbon";
-        } else {
-          nominalInput.value = "";
-          ketInput.value = "";
-          delete form.dataset.kasbonId;
-          saveBtn.innerText = "Simpan Kasbon";
-        }
-      });
-    input?.addEventListener("input", (e) => {
-      e.target.value = formatRibuan(e.target.value);
-    });
-    document.querySelector(".kasbon-save-btn")
-      ?.addEventListener("click", (e) => saveKasbonCost(e));
-  }, 50);
-});
-function initKasbonDropdown(users) {
-  const wrap = document.querySelector(".kasbon-dropdown");
-  if (!wrap) return;
-  const selected = wrap.querySelector(".kasbon-dropdown-selected");
-  const list = wrap.querySelector(".kasbon-dropdown-list");
-  const hidden = wrap.querySelector(".kasbon-nama");
-
-  list.innerHTML = users.map(u => `
-    <div class="kasbon-dropdown-item"
-      data-uid="${u.uid}"
-      data-nama="${escapeHtml(u.nama)}">
-
-      <span>${escapeHtml(u.nama)}</span>
-      <small style="opacity:.6">${u.role}</small>
-    </div>
-  `).join("");
-
-  selected.onclick = () => {
-    list.style.display = list.style.display === "block" ? "none" : "block";
+window.initDataharianView = async function() {
+  await loadDhKurirList();
+
+  window.onDataharianReload = async function() {
+    const reloadBtn = document.getElementById("topbarReload");
+    const icon      = reloadBtn?.querySelector("i");
+    if (icon) icon.classList.add("fa-spin");
+    if (reloadBtn) reloadBtn.disabled = true;
+    try { await loadDhKurirList(); } catch {}
+    if (icon) icon.classList.remove("fa-spin");
+    if (reloadBtn) reloadBtn.disabled = false;
   };
 
-  list.querySelectorAll(".kasbon-dropdown-item").forEach(item => {
-    item.onclick = async () => {
-      selected.innerText = item.dataset.nama;
-      hidden.value = item.dataset.uid;
-      list.style.display = "none";
-      const form = document.querySelector(".kasbon-form");
-      if (!form) return;
-      const tanggal = form.querySelector(".kasbon-tanggal").value;
-      const uid = item.dataset.uid;
-      const kasbon = await getKasbonByTanggalUser(tanggal, uid);
-      const nominalInput = form.querySelector(".kasbon-nominal");
-      const ketInput = form.querySelector(".kasbon-keterangan");
-      const saveBtn = form.querySelector(".kasbon-save-btn");
-      if (kasbon) {
-        nominalInput.value = formatRibuan(kasbon.data.nominal || 0);
-        ketInput.value = kasbon.data.keterangan || "";
-        form.dataset.kasbonId = kasbon.id;
-        saveBtn.innerText = "Update Kasbon";
-        console.log("kasbon ditemukan", kasbon);
-      } else {
-        nominalInput.value = "";
-        ketInput.value = "";
-        delete form.dataset.kasbonId;
-        saveBtn.innerText = "Simpan Kasbon";
-        console.log("belum ada kasbon");
-      }
-    };
+  document.getElementById("topbarBackBtn")?.addEventListener("click", () => {
+    document.getElementById("dhDetailWrapper")?.classList.remove("show");
+    document.getElementById("topbarBackBtn").style.display = "none";
+    activeKurirUid  = null;
+    activeKurirUser = null;
+    loadDhKurirList();
   });
-  wrap._closeHandler = (e) => {
-    if (!wrap.contains(e.target)) {
-      list.style.display = "none";
-    }
-  };
-  document.removeEventListener("click", wrap._closeHandler);
-  document.addEventListener("click", wrap._closeHandler);
-}
-async function loadKasbonUsers() {
-  const user = auth.currentUser;
-  if (!user) return [];
-  try {
-    const snap = await getDocs(
-      query(
-        collection(db, "users"),
-        where("createdBy", "==", user.uid),
-        where("status", "==", true),
-        where("role", "in", ["adminCabang", "produksi"])
-      )
-    );
-    const result = [];
-    snap.forEach(docSnap => {
-      const d = docSnap.data();
-      result.push({
-        uid: docSnap.id,
-        nama: d.nama || "Tanpa Nama",
-        role: d.role || "-"
-      });
-    });
-    console.log("👥 Kasbon Users:", result);
-    return result;
-  } catch (err) {
-    console.error("❌ loadKasbonUsers error:", err);
-    return [];
-  }
-}
-async function saveKasbonCost(e) {
-  const btn = e?.target || document.querySelector(".kasbon-save-btn");
-  const form = document.querySelector(".kasbon-form");
-  if (!form || !btn) return;
-  const originalText = "Simpan Kasbon";
-  try {
-    btn.disabled = true;
-    btn.innerHTML = `
-      <span class="kasbon-spinner"></span>
-      Menyimpan...
-    `;
-    const user = auth.currentUser;
-    if (!user) throw new Error("Belum login");
+};
 
-    const tanggal = form.querySelector(".kasbon-tanggal").value;
-    const uid = form.querySelector(".kasbon-nama").value;
-    const nominal = parseRibuan(form.querySelector(".kasbon-nominal").value || 0);
-    const keterangan = form.querySelector(".kasbon-keterangan").value.trim();
-    const nama = form.querySelector(".kasbon-dropdown-selected")?.innerText.trim() || "";
+let activeKurirUid  = null;
+let activeKurirUser = null;
 
-    if (!tanggal || !uid || nominal <= 0 || !nama) {
-      btn.innerHTML = "Data belum lengkap";
-      setTimeout(() => {
-        btn.innerHTML = originalText;
-        btn.disabled = false;
-      }, 1500);
-      return;
-    }
-
-    // Ambil role dari users collection
-    const userSnap = await getDoc(doc(db, "users", uid));
-    const userData = userSnap.exists() ? userSnap.data() : {};
-
-    const kasbonId = form.dataset.kasbonId || Date.now().toString();
-    const kasbonData = {
-      uid,
-      nama,
-      role: userData.role || "",
-      tanggal,
-      nominal,
-      keterangan,
-      createdAt: Date.now()
-    };
-
-    const adminSnap = await getDoc(doc(db, "users", user.uid));
-    const adminData = adminSnap.data();
-    const idCabang = adminData?.idCabang || "";
-
-    const laporanRef = doc(db, "users", user.uid, "laporanAdmin", tanggal);
-    await setDoc(laporanRef, {
-      createdBy: user.uid,
-      idCabang,
-      tanggal,
-      updatedAt: serverTimestamp(),
-      pengeluaranProduksi: {
-        kasbon: {
-          [kasbonId]: kasbonData
-        }
-      }
-    }, { merge: true });
-
-    await updateRincianPengeluaranSync(user.uid);
-
-    const oldLocal = await getPengeluaranIndexedDB(tanggal);
-    const oldKasbon = oldLocal?.pengeluaranProduksi?.kasbon || {};
-    await savePengeluaranIndexedDB({
-      ...(oldLocal || {}),
-      tanggal,
-      pengeluaranProduksi: {
-        ...(oldLocal?.pengeluaranProduksi || {}),
-        kasbon: {
-          ...oldKasbon,
-          [kasbonId]: kasbonData
-        }
-      },
-      updatedAt: Date.now()
-    });
-
-    console.log("✅ kasbon saved:", kasbonData);
-    btn.innerHTML = "✔ Tersimpan";
-    setTimeout(() => {
-      btn.innerHTML = originalText;
-      btn.disabled = false;
-      closePopupWithCleanup?.();
-    }, 1500);
-
-  } catch (err) {
-    console.error("❌ saveKasbonCost:", err);
-    btn.innerHTML = "❌ Gagal";
-    setTimeout(() => {
-      btn.innerHTML = originalText;
-      btn.disabled = false;
-    }, 2000);
-  }
-}
-async function loadKasbonDraft(tanggal) {
-  try {
-    const today = tanggal || getTanggalLocal();
-
-    // 1. Coba IndexedDB dulu
-    const localData = await getPengeluaranIndexedDB(today);
-    if (localData?.pengeluaranProduksi?.kasbon) {
-      console.log("💾 kasbon dari IndexedDB:", localData.pengeluaranProduksi.kasbon);
-      return localData.pengeluaranProduksi.kasbon;
-    }
-
-    // 2. Fallback ke Firestore
-    console.log("📭 IndexedDB kosong, load kasbon dari Firestore...");
-    const user = auth.currentUser;
-    if (!user) return {};
-
-    const snap = await getDoc(doc(db, "users", user.uid, "laporanAdmin", today));
-    if (snap.exists() && snap.data()?.pengeluaranProduksi?.kasbon) {
-      const kasbon = snap.data().pengeluaranProduksi.kasbon;
-      console.log("☁️ kasbon dari Firestore:", kasbon);
-
-      // Simpan ke IndexedDB supaya next load tidak perlu ke Firestore
-      const oldLocal = await getPengeluaranIndexedDB(today);
-      await savePengeluaranIndexedDB({
-        ...(oldLocal || {}),
-        tanggal: today,
-        pengeluaranProduksi: {
-          ...(oldLocal?.pengeluaranProduksi || {}),
-          kasbon
-        },
-        updatedAt: Date.now()
-      });
-
-      return kasbon;
-    }
-
-    console.log("📭 Firestore kasbon juga kosong");
-    return {};
-
-  } catch (err) {
-    console.error("❌ loadKasbonDraft:", err);
-    return {};
-  }
-}
-
-// ── Load Varian ────────────────────────────────────────
-async function loadVarian() {
-  if (cacheVarian && cacheUpdatedAt && (Date.now() - cacheUpdatedAt < CACHE_TTL)) return cacheVarian;
-  try {
-    const user = auth.currentUser;
-    if (!user) return [];
-    const userSnap = await getDoc(doc(db, "users", user.uid));
-    if (!userSnap.exists()) return [];
-    const varian = userSnap.data().varian || [];
-    cacheVarian = varian;
-    cacheUpdatedAt = Date.now();
-    return varian;
-  } catch (err) {
-    console.error("Gagal load varian", err);
-    return [];
-  }
-}
-function invalidateVarianCache() {
-  cacheVarian = null;
-  cacheUpdatedAt = null;
-}
-
-// ── Helpers ────────────────────────────────────────────
-function getTanggalLocal() {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
-}
-function getHariIndonesia(tanggal) {
-  const hariNama = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
-  const date = new Date(`${tanggal}T00:00:00`);
-  return hariNama[date.getDay()];
-}
-function escapeHtml(str) {
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-function formatRibuan(value) {
-  const angka = String(value).replace(/\D/g, "");
-  return angka ? Number(angka).toLocaleString("id-ID") : "";
-}
-function parseRibuan(value) {
-  return Number(String(value).replace(/\./g, "").replace(/\D/g, "")) || 0;
-}
-function formatTanggalIndonesia(timestamp) {
-  if (!timestamp?.toDate) return "-";
-  const date = timestamp.toDate();
-  return new Intl.DateTimeFormat("id-ID", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric"
-  }).format(date);
-}
-
-async function loadKurir() {
-  const listEl = document.getElementById("listKurir");
+/* ── LOAD KURIR LIST ── */
+async function loadDhKurirList() {
+  const listEl = document.getElementById("dhKurirList");
   if (!listEl) return;
-  try {
-    const user = auth.currentUser;
-    if (!user) {
-      listEl.innerHTML = `<div class="loading-card">Menunggu login...</div>`;
-      return;
-    }
-    const roles = ["kurir", "sales", "hunter"];
-    const snap = await getDocs(
-      query(
-        collection(db, "users"),
-        where("role", "in", roles),
-        where("createdBy", "==", user.uid),
-        where("status", "==", true)
-      )
-    );
-    if (snap.empty) {
-      listEl.innerHTML = `<div class="loading-card">Belum ada kurir</div>`;
-      return;
-    }
-    let html = "";
-    snap.forEach(docSnap => {
-      const data = docSnap.data();
-      // safety filter (kalau suatu saat data produksi nyasar ke query)
-      if (!roles.includes(data.role)) {
-        console.log("⛔ DIBLOK ROLE:", data.role, docSnap.id);
-        return;
-      }
-      const nama = escapeHtml(data.nama || "Tanpa Nama");
-      const uidMarketing = escapeHtml(docSnap.id);
-      const role = escapeHtml(data.role || "kurir");
-      const foto = data.foto || "";
-      const inisial = (data.nama || "?").trim().charAt(0).toUpperCase();
-      cacheKurirMap[docSnap.id] = {
-        nama: data.nama || "Tanpa Nama",
-        role: data.role || "kurir"
-      };      
-      const hasCatatan = !!(data.catatan?.body?.trim());
 
-      const avatarHtml = foto
-        ? `<img class="avatar-img" src="${escapeHtml(foto)}" data-inisial="${escapeHtml(inisial)}" alt="${nama}">`
-        : `<span class="avatar-text">${escapeHtml(inisial)}</span>`;
-      const avatarWrap = `
-        <div class="avatar-wrap">
-          ${avatarHtml}
-          ${hasCatatan ? `<span class="kurir-catatan-dot"></span>` : ""}
-        </div>`;
-
-      const actionBtn = (type, label, svg) => `
-        <div class="kurir-action">
-          <button class="action-btn popup-btn"
-            data-type="${type}"
-            data-nama="${nama}"
-            data-uid="${uidMarketing}">
-      
-            ${svg}
-      
-          </button>
-      
-          <div class="action-tooltip">${label}</div>
-        </div>`;
-
-        html += `
-          <div class="kurir-card kurir-open-popup"
-            data-nama="${nama}"
-            data-role="${role}"
-            data-uid="${uidMarketing}">
-            
-            <div class="avatar">${avatarWrap}</div>
-        
-            <div class="kurir-info">
-              <h3>${nama}</h3>
-              <p>${role}</p>
-            </div>
-        
-            <div class="kurir-action-group">
-        
-              ${actionBtn("order", "Order", `
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
-                </svg>
-
-
-              `)}
-        
-              ${actionBtn("fee", "Fee", `
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
-                </svg>
-              `)}
-        
-              ${actionBtn("offflavor", "Off Flavor", `
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 0 1-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 0 1 4.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0 1 12 15a9.065 9.065 0 0 0-6.23-.693L5 14.5m14.8.8 1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0 1 12 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5" />
-                </svg>
-              `)}
-        
-              ${actionBtn("sisabarang", "Sisa Barang", `
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
-                </svg>
-
-              `)}
-        
-              ${actionBtn("pembayaran", "Pembayaran", `
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125" />
-                </svg>
-              `)}
-        
-            </div>
-          </div>
-        `;
-    });
-
-    listEl.innerHTML = html;
-    // ── Long Press Catatan Kurir ──
-    listEl.querySelectorAll(".kurir-card").forEach(card => {
-      let pressTimer = null;
-      function startPress() {
-        pressTimer = setTimeout(async () => {
-          console.log("📝 Open Catatan:", card.dataset.uid);
-          await openPopupCatatanKurir(card.dataset.uid, card.dataset.nama);
-        }, 600);
-      }
-      function cancelPress() {
-        clearTimeout(pressTimer);
-      }
-      card.addEventListener("touchstart", startPress, { passive: true });
-      card.addEventListener("touchend", cancelPress);
-      card.addEventListener("touchmove", cancelPress);
-      card.addEventListener("mousedown", startPress);
-      card.addEventListener("mouseup", cancelPress);
-      card.addEventListener("mouseleave", cancelPress);
-    });
-    listEl.querySelectorAll(".avatar-img").forEach(img => {
-      img.addEventListener("error", function () {
-        this.parentElement.innerHTML =
-          `<span class="avatar-text">${escapeHtml(this.dataset.inisial || "?")}</span>`;
-      });
-    });
-  } catch (err) {
-    console.error("❌ loadKurir error:", err);
-    listEl.innerHTML = `<div class="loading-card">Gagal memuat data</div>`;
-  }
-}
-function setupEnterNavigation(form) {
-  const inputs = Array.from(form.querySelectorAll("input"));
-  inputs.forEach((input, i) => {
-    input.addEventListener("keydown", e => {
-      if (e.key !== "Enter") return;
-      e.preventDefault();
-      const next = inputs[i + 1];
-      if (next) {
-        next.focus();
-      } else {
-        form.querySelector(".popup-save-btn")?.focus();
-      }
-    });
-  });
-}
-async function buildPopupForm(type, nama, uidMarketing) {
-  const varian = await loadVarian();
-  const isPembayaran = type === "pembayaran";
-  let inputsHtml = "";
-
-  // ambil harga dari varian kurir yang dipilih
-  let varianKurir = {};
-  if (isPembayaran) {
-    try {
-      const kurirSnap = await getDoc(doc(db, "users", uidMarketing));
-      if (kurirSnap.exists()) {
-        const kurirData = kurirSnap.data();
-        (kurirData.varian || []).forEach(item => {
-          const key = Object.keys(item)[0];
-          if (key) varianKurir[key] = item[key];
-        });
-      }
-    } catch (err) {
-      console.error("Gagal load varian kurir:", err);
-    }
-  }
-
-  varian.forEach(item => {
-    const namaKey = Object.keys(item)[0];
-    if (!namaKey) return;
-    const detail = item[namaKey];
-    if (!detail || detail.isAktif !== true) return;
-
-    if (isPembayaran) {
-      const hargaProduksi = varianKurir[namaKey]?.hargaProduksi || detail.hargaProduksi || 0;
-      inputsHtml += `
-        <div class="popup-payment-row" data-key="${escapeHtml(namaKey)}">
-          <div class="payment-inline">
-            <span class="payment-label">${escapeHtml(namaKey)}</span>
-            <span class="payment-closing">0</span>
-            <span class="payment-x">×</span>
-            <span class="payment-harga" data-harga="${hargaProduksi}">${hargaProduksi.toLocaleString("id-ID")}</span>
-            <span class="payment-separator">:</span>
-            <span class="payment-total">0</span>
-          </div>
-        </div>`;
-    } else {
-      inputsHtml += `
-        <div class="popup-input-row">
-          <label>${escapeHtml(namaKey)}</label>
-          <input type="number" min="0" class="popup-input" data-key="${escapeHtml(namaKey)}">
-        </div>`;
-    }
-  });
-
-  const today = getTanggalLocal();
-  return `
-    <div class="popup-form" data-type="${escapeHtml(type)}" data-uid="${escapeHtml(uidMarketing)}">
-      <div class="popup-kurir">${escapeHtml(nama)}</div>
-      <div class="popup-input-row">
-        <label>Tanggal</label>
-        <input type="date" class="popup-input popup-date" value="${today}">
+  listEl.innerHTML = [1,2,3].map(() => `
+    <div class="dh-kurir-item" style="pointer-events:none">
+      <div class="dh-kurir-avatar sk" style="background:none"></div>
+      <div class="dh-kurir-info">
+        <div class="sk" style="height:13px;width:100px;margin-bottom:6px;border-radius:6px"></div>
+        <div class="sk" style="height:11px;width:60px;border-radius:6px"></div>
       </div>
-      ${inputsHtml}
-      ${isPembayaran ? `
-        <div class="popup-payment-summary">
-          <div class="popup-summary-row"><span>Jumlah</span><span class="sum-value">0</span></div>
-          <div class="popup-summary-row"><span>Total Harga</span><span class="sum-harga">0</span></div>
-        </div>
-        <div class="popup-input-row">
-          <label>Bayar</label>
-          <input type="text" inputmode="numeric" min="0" class="popup-input input-bayar">
-        </div>
-        <div class="payment-keterangan">0</div>` : ""}
-      <button class="popup-save-btn">Simpan</button>
-    </div>`;
+    </div>`).join("");
+
+  let users = await window.idb.getUsers();
+  users = users.filter(u => ["kurir","sales","hunter"].includes(u.role));
+  window.usersCache = await window.idb.getUsers();
+  renderDhKurirList(users);
 }
-async function calculatePembayaran(form) {
-  try {
-    if (form.dataset.type !== "pembayaran") return;
-    const tanggal = form.querySelector(".popup-date").value;
-    if (!tanggal) return;
 
-    const laporanSnap = await getDoc(doc(db, "users", form.dataset.uid, "laporanMarketing", tanggal));
-    const d = laporanSnap.exists() ? laporanSnap.data() : {};
-    const order = d.order || {};
-    const fee = d.fee || {};
-    const offFlavor = d.offFlavor || {};
-    const sisaBarang = d.sisaBarang || {};
+/* ── RENDER KURIR LIST ── */
+function renderDhKurirList(users = []) {
+  const listEl = document.getElementById("dhKurirList");
+  if (!listEl) return;
 
-    let sumValue = 0, sumHarga = 0;
-    form.querySelectorAll(".popup-payment-row").forEach(row => {
-      const key = row.dataset.key;
-      const closing = Math.max(0,
-        Number(order[key] || 0) - Number(fee[key] || 0) -
-        Number(offFlavor[key] || 0) - Number(sisaBarang[key] || 0)
-      );
-      const hargaEl = row.querySelector(".payment-harga");
-      const harga = Number(hargaEl.dataset.harga || 0);
-      const total = closing * harga;
-      row.querySelector(".payment-closing").innerText = closing;
-      hargaEl.innerText = harga.toLocaleString("id-ID");
-      row.querySelector(".payment-total").innerText = total.toLocaleString("id-ID");
-      sumValue += closing;
-      sumHarga += total;
-    });
-
-    const sumValueEl = form.querySelector(".sum-value");
-    const sumHargaEl = form.querySelector(".sum-harga");
-    if (sumValueEl) sumValueEl.innerText = sumValue.toLocaleString("id-ID");
-    if (sumHargaEl) sumHargaEl.innerText = sumHarga.toLocaleString("id-ID");
-
-    const bayar = parseRibuan(form.querySelector(".input-bayar")?.value || 0);
-    const selisih = bayar - sumHarga;
-    const ketEl = form.querySelector(".payment-keterangan");
-    if (!ketEl) return;
-
-    if (selisih === 0) {
-      ketEl.innerText = "Lunas";
-      ketEl.style.color = "green";
-    } else if (selisih < 0) {
-      ketEl.innerText = `- ${Math.abs(selisih).toLocaleString("id-ID")}`;
-      ketEl.style.color = "red";
-    } else {
-      ketEl.innerText = `+ ${selisih.toLocaleString("id-ID")}`;
-      ketEl.style.color = "purple";
-    }
-  } catch (err) {
-    console.error("Gagal hitung pembayaran", err);
-  }
-}
-async function loadPopupPreview(form) {
-  try {
-    const type = form.dataset.type;
-    const tanggal = form.querySelector(".popup-date")?.value;
-    if (!tanggal) return;
-    let firestoreField = type;
-    if (type === "offflavor") firestoreField = "offFlavor";
-    if (type === "sisabarang") firestoreField = "sisaBarang";
-    let data = {};
-    try {
-      const snap = await getDoc(doc(db, "users", form.dataset.uid, "laporanMarketing", tanggal));
-      if (snap.exists()) data = snap.data();
-    } catch (err) {
-      console.warn("Preview kosong:", err.code);
-    }
-    if (type === "pembayaran") {
-      const bayarInput = form.querySelector(".input-bayar");
-      const bayar = data.pembayaran?.nota?.bayar;
-      if (bayarInput) bayarInput.value = bayar > 0 ? formatRibuan(bayar) : "";
-      await calculatePembayaran(form);
-      return;
-    }
-
-    const popupData = data[firestoreField] || {};
-    form.querySelectorAll(".popup-input[data-key]").forEach(input => {
-      const val = popupData[input.dataset.key];
-      input.value = val > 0 ? val : "";
-    });
-  } catch (err) {
-    console.error("Gagal preview popup", err);
-  }
-}
-async function savePopupData(btn) {
-  const form = btn.closest(".popup-form");
-  if (!form) return;
-
-  btn.disabled = true;
-  btn.innerText = "Menyimpan...";
-  let sukses = false;
-
-  try {
-    const user = auth.currentUser;
-    if (!user) throw new Error("Belum login");
-
-    const adminSnap = await getDoc(doc(db, "users", user.uid));
-    if (!adminSnap.exists()) throw new Error("User tidak ditemukan");
-
-    const adminData = adminSnap.data();
-    const idCabang = adminData.idCabang || "";
-    const uidMarketing = form.dataset.uid;
-    const type = form.dataset.type;
-    const tanggal = form.querySelector(".popup-date").value;
-    if (!tanggal) { alert("Tanggal wajib diisi"); return; }
-
-    const laporanRef = doc(db, "users", uidMarketing, "laporanMarketing", tanggal);
-
-    // ── Pembayaran ─────────────────────────────────────
-    if (type === "pembayaran") {
-      await calculatePembayaran(form);
-
-      const closing = {};
-      let totalHarga = 0;
-      form.querySelectorAll(".popup-payment-row").forEach(row => {
-        const key = row.dataset.key;
-        const value = Number(row.querySelector(".payment-closing").innerText || 0);
-        const harga = Number(row.querySelector(".payment-harga").dataset.harga || 0);
-        if (value > 0) closing[key] = value;
-        totalHarga += value * harga;
-      });
-
-      const bayar = parseRibuan(form.querySelector(".input-bayar")?.value || 0);
-      const selisih = bayar - totalHarga;
-      const status = selisih === 0 ? "Lunas" : selisih < 0 ? "Kurang" : "Lebih";
-
-      await setDoc(laporanRef, {
-        createdBy: user.uid,
-        idMarketing: uidMarketing,
-        idCabang,
-        tanggal,
-        pembayaran: {
-          closing,
-          nota: { bayar, keterangan: selisih, status },
-          createdAt: serverTimestamp()
-        }
-      }, { merge: true });
-
-      // Mirror ke laporanAdmin
-      try {
-        const laporanSnap = await getDoc(laporanRef);
-        const laporanData = laporanSnap.exists() ? laporanSnap.data() : {};
-        const marketingSnap = await getDoc(doc(db, "users", uidMarketing));
-        const namaMarketing = marketingSnap.exists() ? (marketingSnap.data().nama || "") : "";
-
-        await setDoc(doc(db, "users", user.uid, "laporanAdmin", tanggal), {
-          createdBy: user.uid,
-          idCabang,
-          tanggal,
-          updatedAt: serverTimestamp(),
-          [uidMarketing]: {
-            nama: namaMarketing,
-            order: laporanData.order || {},
-            fee: laporanData.fee || {},
-            offFlavor: laporanData.offFlavor || {},
-            sisaBarang: laporanData.sisaBarang || {},
-            pembayaran: {
-              closing,
-              nota: { bayar, keterangan: selisih, status },
-              createdAt: serverTimestamp()
-            }
-          }
-        }, { merge: true });
-        console.log("✅ laporanAdmin berhasil diupdate");
-      } catch (err) {
-        console.error("❌ Gagal update laporanAdmin", err);
-      }
-      sukses = true;
-      btn.innerText = "Tersimpan ✓";
-      setTimeout(() => closePopupWithCleanup(), 700);
-      return;
-    }
-
-    // ── Normal (order / fee / dst) ─────────────────────
-    const mapData = {};
-    form.querySelectorAll("[data-key]").forEach(input => {
-      const val = Number(input.value || 0);
-      if (val > 0) mapData[input.dataset.key] = val;
-    });
-
-    let firestoreField = type;
-    if (type === "offflavor") firestoreField = "offFlavor";
-    if (type === "sisabarang") firestoreField = "sisaBarang";
-
-    try {
-      const snap = await getDoc(laporanRef);
-      if (snap.exists()) await setDoc(laporanRef, { [firestoreField]: deleteField() }, { merge: true });
-    } catch (err) {
-      console.warn("Skip read laporan:", err.code);
-    }
-
-    await setDoc(laporanRef, {
-      createdBy: user.uid,
-      idMarketing: uidMarketing,
-      idCabang,
-      tanggal,
-      createdAt: serverTimestamp(),
-      [firestoreField]: mapData
-    }, { merge: true });
-
-    // Update bawaBarang (khusus order)
-    if (type === "order") {
-      try {
-        const marketingRef  = doc(db, "users", uidMarketing);
-        const marketingSnap = await getDoc(marketingRef);
-        if (marketingSnap.exists()) {
-          const marketingData = marketingSnap.data();
-          const oldBawaBarang = marketingData.bawaBarang || [];
-          const varian        = marketingData.varian     || [];
-
-          let newBawaBarang;
-
-          if (oldBawaBarang.length > 0) {
-            newBawaBarang = oldBawaBarang.map(item => {
-              const key = Object.keys(item)[0];
-              if (!key) return item;
-              // Hanya simpan bawa, buang field yang sudah ada di varian
-              const { hargaKonsumen, hargaProduksi, isAktif, ...rest } = item[key] || {};
-              return { [key]: { ...rest, bawa: Number(mapData[key] ?? 0) } };
-            });
-          } else if (varian.length > 0) {
-            // Fallback dari varian — hanya ambil key, simpan bawa saja
-            newBawaBarang = varian.map(item => {
-              const key = Object.keys(item)[0];
-              if (!key) return item;
-              return { [key]: { bawa: Number(mapData[key] ?? 0) } };
-            });
-          } else {
-            console.warn("bawaBarang dan varian kosong, skip update");
-            return;
-          }
-
-          await setDoc(marketingRef, {
-            bawaBarang      : newBawaBarang,
-            bawaBarangUpdate: serverTimestamp()
-          }, { merge: true });
-
-          console.log("✅ bawaBarang updated:", newBawaBarang);
-        }
-      } catch (err) {
-        console.error("❌ Gagal update bawaBarang:", err);
-      }
-    }
-    sukses = true;
-    btn.innerText = "Tersimpan ✓";
-    setTimeout(() => closePopupWithCleanup(), 700);
-  } catch (err) {
-    console.error(err);
-    alert("Gagal menyimpan");
-  } finally {
-    if (!sukses) {
-      btn.disabled = false;
-      btn.innerText = "Simpan";
-    }
-  }
-}
-function openPopup(title, content) {
-  document.getElementById("popupTitle").innerText = title;
-  document.getElementById("popupContent").innerHTML = content;
-  document.getElementById("popupOverlay").classList.add("show");
-  document.body.classList.add("popup-open");
-  requestAnimationFrame(() => enablePopupDrag(".popup-box", ".popup-header"));
-}
-function closePopup() {
-  document.getElementById("popupOverlay").classList.remove("show");
-  document.body.classList.remove("popup-open");
-}
-async function openPopupCatatanKurir(uidKurir, namaKurir) {
-  try {
-    const snap = await getDoc(doc(db, "users", uidKurir));
-    let body = "";
-    let createdAtText = "-";
-    if (snap.exists()) {
-      const data = snap.data();
-      body = data?.catatan?.body || "";
-      createdAtText = formatTanggalIndonesia(data?.catatan?.createdAt);
-    }
-    const content = `
-      <div class="popup-catatan" data-uid="${escapeHtml(uidKurir)}">
-        <div class="popup-catatan-header">
-          <div class="popup-catatan-title">Catatan: ${escapeHtml(namaKurir)}</div>
-          <div class="popup-catatan-date">Terakhir diubah: ${escapeHtml(createdAtText)}</div>
-        </div>
-        <textarea class="popup-catatan-input" placeholder="Tulis catatan" rows="8">${escapeHtml(body)}</textarea>
-        <button class="popup-catatan-save">Simpan</button>
-      </div>`;
-    openPopup("Catatan Kurir", content);
-  } catch (err) {
-    console.error("Gagal buka catatan", err);
-    alert("Gagal memuat catatan");
-  }
-}
-async function saveCatatanKurir(btn) {
-  const wrap = btn.closest(".popup-catatan");
-  if (!wrap) return;
-  const uid = wrap.dataset.uid;
-  const textarea = wrap.querySelector(".popup-catatan-input");
-  const body = textarea?.value?.trim() || "";
-  btn.disabled = true;
-  btn.innerText = "Menyimpan...";
-  try {
-    await setDoc(
-      doc(db, "users", uid),
-      { catatan: { body, createdAt: serverTimestamp() } },
-      { merge: true }
-    );
-    btn.innerText = "Catatan disimpan";
-    setTimeout(() => closePopupWithCleanup(), 900);
-  } catch (err) {
-    console.error("Gagal simpan catatan", err);
-    btn.disabled = false;
-    btn.innerText = "Gagal";
-  }
-}
-async function loadDataHarian(uidKurir, forceReload = false, selectedTanggal = null) {
-  const tanggal = selectedTanggal || getTanggalLocal();
-  const cacheKey = `${uidKurir}_${tanggal}`;
-
-  // ── RELOAD MANUAL ──
-  if (forceReload) {
-    try {
-      console.log("🔄 Reload Firestore", cacheKey);
-
-      delete cacheDataHarian[cacheKey];
-      // BUG FIX: pisah argumen
-      await deleteDataHarianIndexedDB(uidKurir, tanggal);
-
-      const adminSnap = await getDoc(doc(db, "users", auth.currentUser.uid));
-      const idCabang = adminSnap.exists() ? (adminSnap.data().idCabang || "") : "";
-      if (!idCabang) return null;
-
-      const hasil = {
-        fee: {},
-        disable: {},
-        closing: {},
-        expired: {},
-        pay: {},
-        saldoBarang: {},
-        kunjungan: 0,
-        pembayaran: { bayarKonsumen: 0, bayarProduksi: 0 },
-        keterangan: { pending: 0, tutup: 0, putus: 0 },
-        customerNew: 0,
-        customerLama: 0,
-        customerTambahan: 0
-      };
-
-      const snap = await getDocs(query(
-        collectionGroup(db, "dataHarian"),
-        where("idCabang", "==", idCabang),
-        where("pemilik", "==", uidKurir),
-        where("tanggal", "==", tanggal)
-      ));
-
-      hasil.kunjungan = snap.size;
-
-      snap.forEach(docSnap => {
-        const data = docSnap.data();
-
-        ["fee", "disable", "closing", "expired", "pay"].forEach(f => {
-          if (!data[f] || typeof data[f] !== "object") return;
-          Object.entries(data[f]).forEach(([key, val]) => {
-            hasil[f][key] = (hasil[f][key] || 0) + (Number(val) || 0);
-          });
-        });
-
-        if (data.pembayaran) {
-          hasil.pembayaran.bayarKonsumen += Number(data.pembayaran?.bayarKonsumen) || 0;
-          hasil.pembayaran.bayarProduksi += Number(data.pembayaran?.bayarProduksi) || 0;
-        }
-
-        const status = data?.keterangan?.status?.trim()?.toLowerCase();
-        if (status === "pending") hasil.keterangan.pending++;
-        else if (status === "tutup") hasil.keterangan.tutup++;
-        else if (status === "putus") hasil.keterangan.putus++;
-      });
-      // ── Ambil Bawa Barang (order laporanMarketing) ──
-      try {
-        const laporanMarketingSnap = await getDoc(
-          doc(db, "users", uidKurir, "laporanMarketing", tanggal)
-        );
-      
-        const order = laporanMarketingSnap.exists()
-          ? (laporanMarketingSnap.data().order || {})
-          : {};
-      
-        // Rumus:
-        // saldo = bawaBarang - closing - fee - disable
-        const allKeys = new Set([
-          ...Object.keys(order),
-          ...Object.keys(hasil.closing),
-          ...Object.keys(hasil.fee),
-          ...Object.keys(hasil.disable)
-        ]);
-      
-        allKeys.forEach(key => {
-          const bawaBarang = Number(order[key] || 0);
-          const closing = Number(hasil.closing[key] || 0);
-          const fee = Number(hasil.fee[key] || 0);
-          const disable = Number(hasil.disable[key] || 0);
-      
-          hasil.saldoBarang[key] =
-            bawaBarang - closing - fee - disable;
-        });
-      
-      } catch (err) {
-        console.error("❌ Gagal hitung saldo barang", err);
-      }
-      // ── Hitung Customer ──
-      const startDate = new Date(`${tanggal}T00:00:00`);
-      const endDate = new Date(startDate);
-      endDate.setDate(endDate.getDate() + 1);
-      const startTimestamp = Timestamp.fromDate(startDate);
-      const endTimestamp = Timestamp.fromDate(endDate);
-      const hariFilter = getHariIndonesia(tanggal);
-
-      try {
-        // Customer Baru
-        const customerNewSnap = await getDocs(query(
-          collection(db, "customer"),
-          where("idCabang", "==", idCabang),
-          where("pemilik", "==", uidKurir),
-          where("createdBy", "==", uidKurir),
-          where("acc", "==", true),
-          where("createdAt", ">=", startTimestamp),
-          where("createdAt", "<", endTimestamp)
-        ));
-        hasil.customerNew = customerNewSnap.size;
-
-        // Customer Lama
-        const customerLamaSnap = await getDocs(query(
-          collection(db, "customer"),
-          where("idCabang", "==", idCabang),
-          where("pemilik", "==", uidKurir),
-          where("hari", "==", hariFilter),
-          where("isNew", "==", false)
-        ));
-        hasil.customerLama = customerLamaSnap.docs.filter(docSnap => {
-          const data = docSnap.data();
-          return !("acc" in data);
-        }).length;
-
-        // Customer Tambahan
-        const customerTambahanSnap = await getDocs(query(
-          collection(db, "customer"),
-          where("idCabang", "==", idCabang),
-          where("pemilik", "==", uidKurir),
-          where("hari", "==", hariFilter),
-          where("isNew", "==", true)
-        ));
-        hasil.customerTambahan = customerTambahanSnap.docs.filter(docSnap => {
-          const data = docSnap.data();
-          return !("acc" in data);
-        }).length;
-
-        console.log("👥 Customer", {
-          baru: hasil.customerNew,
-          lama: hasil.customerLama,
-          tambahan: hasil.customerTambahan,
-          hari: hariFilter
-        });
-      } catch (err) {
-        console.error("❌ Gagal query customer", err);
-        hasil.customerNew = 0;
-        hasil.customerLama = 0;
-        hasil.customerTambahan = 0;
-      }
-
-      let namaKurir = "";
-      try {
-      const kurirSnap = await getDoc(doc(db, "users", uidKurir));
-      namaKurir = kurirSnap.exists() ? (kurirSnap.data().nama || "") : "";
-      } catch (_) {}
-      
-      hasil.nama = namaKurir;
-      cacheDataHarian[cacheKey] = hasil;
-      await saveDataHarianIndexedDB(uidKurir, tanggal, hasil);
-
-      const savedIndexed = await getDataHarianIndexedDB(uidKurir, tanggal);
-      console.log("💾 INDEXEDDB FINAL:", {
-        id: cacheKey,
-        uidKurir,
-        tanggal,
-        data: savedIndexed
-      });
-
-      return hasil;
-    } catch (err) {
-      console.error("❌ Reload gagal", err);
-      return null;
-    }
-  }
-
-  // ── 1. RAM ──
-  if (cacheDataHarian[cacheKey] !== undefined) {
-    console.log("⚡ RAM HIT", cacheKey);
-    return cacheDataHarian[cacheKey];
-  }
-
-  // ── 2. IndexedDB ──
-  const indexedData = await getDataHarianIndexedDB(uidKurir, tanggal);
-  if (indexedData !== null) {
-    console.log("💾 IndexedDB HIT", cacheKey);
-    cacheDataHarian[cacheKey] = indexedData;
-    return indexedData;
-  }
-
-  // ── 3. Tidak ada cache ──
-  console.log("📭 Belum ada cache", cacheKey);
-  cacheDataHarian[cacheKey] = undefined;
-  return undefined;
-}
-async function renderPopupDataHarian(uidKurir, nama, role, forceReload = false, selectedTanggal = null) {
-  const contentEl = document.getElementById("popupDataHarianContent");
-  if (!contentEl) return;
-
-  const today = selectedTanggal || getTanggalLocal();
-  const data = await loadDataHarian(uidKurir, forceReload, today);
-
-  // Tidak ada cache + belum reload manual
-  if (data === undefined) {
-    contentEl.innerHTML = `
-      <div class="dh-container">
-        <div class="dh-top">
-          <div class="dh-user">
-            <h3>${escapeHtml(nama)}</h3>
-            <p>${escapeHtml(role)}</p>
-          </div>
-          <div class="dh-date-wrap">
-            <input type="date" class="dh-date-input" value="${today}"
-              data-uid="${escapeHtml(uidKurir)}"
-              data-nama="${escapeHtml(nama)}"
-              data-role="${escapeHtml(role)}">
-          </div>
-        </div>
-        <div style="text-align:center;padding:32px 20px;color:#777;">
-          <div>Belum ada data</div>
-          <div style="font-size:13px;margin-top:6px;">Klik reload untuk memuat data</div>
-        </div>
-        <div class="popup-dataharian-reload-wrap">
-          <button class="popup-dataharian-reload"
-            data-uid="${escapeHtml(uidKurir)}"
-            data-nama="${escapeHtml(nama)}"
-            data-role="${escapeHtml(role)}"
-            data-tanggal="${today}">Reload</button>
-        </div>
-      </div>`;
+  if (!users.length) {
+    listEl.innerHTML = `<div class="dh-empty-msg">Belum ada data.<br>Reload dari Home dulu.</div>`;
     return;
   }
 
-  // Gagal load firestore saat reload
-  if (data === null) {
-    contentEl.innerHTML = `
-      <div style="text-align:center;padding:30px;color:red;">Gagal memuat data</div>
-      <div class="popup-dataharian-reload-wrap">
-        <button class="popup-dataharian-reload"
-          data-uid="${escapeHtml(uidKurir)}"
-          data-nama="${escapeHtml(nama)}"
-          data-role="${escapeHtml(role)}"
-          data-tanggal="${today}">Reload</button>
-      </div>`;
-    return;
-  }
-
-  async function renderItems(obj) {
-    const varian = await loadVarian();
-  
-    const sortedEntries = varian
-      .map(item => {
-        const key = Object.keys(item)[0];
-        return [key, obj[key] || 0];
-      })
-      .filter(([, value]) => value > 0);
-  
-    if (!sortedEntries.length) {
-      return `<div class="dh-empty">Tidak ada data</div>`;
-    }
-  
+  listEl.innerHTML = users.map(u => {
+    const nama    = u.nama || "Tanpa Nama";
+    const inisial = nama.trim().charAt(0).toUpperCase();
+    const avatar  = u.foto
+      ? `<img src="${esc(u.foto)}" alt="${esc(nama)}">`
+      : inisial;
     return `
-      <div class="dh-list">
-        ${sortedEntries.map(([k, v]) => `
-          <div class="dh-item">
-            <span class="dh-key">${escapeHtml(k)}</span>
-            <span class="dh-value">
-              ${Number(v).toLocaleString("id-ID")}
-            </span>
-          </div>
-        `).join("")}
-      </div>
-    `;
-  }
-
-  const card = (cls, title, content) => `
-    <div class="dh-card ${cls}">
-      <div class="dh-card-title">${title}</div>
-      ${content}
-    </div>`;
-
-  const [htmlFee, htmlDisable, htmlClosing, htmlExpired, htmlPay, htmlSaldo] = await Promise.all([
-  renderItems(data.fee),
-  renderItems(data.disable),
-  renderItems(data.closing),
-  renderItems(data.expired),
-  renderItems(data.pay),
-  renderItems(data.saldoBarang || {})
-]);
-
-contentEl.innerHTML = `
-    <div class="dh-container">
-      <div class="dh-top">
-        <div class="dh-user"><h3>${escapeHtml(nama)}</h3><p>${escapeHtml(role)}</p></div>
-        <div class="dh-date-wrap">
-          <input type="date" class="dh-date-input" value="${today}"
-            data-uid="${escapeHtml(uidKurir)}"
-            data-nama="${escapeHtml(nama)}"
-            data-role="${escapeHtml(role)}">
+      <div class="dh-kurir-item ${activeKurirUid === u.uid ? "active" : ""}" data-uid="${esc(u.uid)}">
+        <div class="dh-kurir-avatar">${avatar}</div>
+        <div class="dh-kurir-info">
+          <div class="dh-kurir-nama">${esc(nama)}</div>
+          <div class="dh-kurir-role">${esc(u.role || "-")}</div>
         </div>
-      </div>
-      <div class="dh-grid">
-        ${card("fee", "Fee", htmlFee)}
-        ${card("disable", "Disable", htmlDisable)}
-        ${card("closing", "Closing", htmlClosing)}
-        ${card("expired", "Expired", htmlExpired)}
-        ${card("pay", "Pay", htmlPay)}
-        ${card("saldo", "Saldo Barang", htmlSaldo)}
-        <div class="dh-omset-full">
-          <div class="dh-omset-title">Total Omset</div>
-          <div class="dh-omset-value">Rp ${Number(data.pembayaran?.bayarKonsumen || 0).toLocaleString("id-ID")}</div>
-          <div class="dh-omset-sub">Total pembayaran konsumen</div>
-        </div>
-      </div>
-      <div class="popup-dataharian-reload-wrap">
-        <button class="popup-dataharian-reload"
-          data-uid="${escapeHtml(uidKurir)}"
-          data-nama="${escapeHtml(nama)}"
-          data-role="${escapeHtml(role)}"
-          data-tanggal="${today}">Reload</button>
-      </div>
-    </div>`;
-}
-function openPopupDataHarian(title, content) {
-  const overlay = document.getElementById("popupDataHarianOverlay");
-  document.getElementById("popupDataHarianTitle").innerText = title;
-  document.getElementById("popupDataHarianContent").innerHTML = content;
-  overlay.classList.add("show");
-  document.body.classList.add("popup-open");
-  requestAnimationFrame(() => enablePopupDrag(".popup-dataharian-box", ".popup-dataharian-header"));
-}
-function closePopupDataHarian() {
-  document.getElementById("popupDataHarianOverlay").classList.remove("show");
-  document.body.classList.remove("popup-open");
-}
-document.getElementById("popupDataHarianClose")
-  ?.addEventListener("touchend", e => {
-    e.preventDefault();
-    e.stopPropagation();
-    closePopupDataHarianWithCleanup();
-  });
-
-function enablePopupDrag(popupSelector, handleSelector) {
-  const popup = document.querySelector(popupSelector);
-  if (popup?._cleanupDrag) popup._cleanupDrag();
-  const handle = popup?.querySelector(handleSelector);
-  if (!popup || !handle || window.innerWidth <= 768) return;
-
-  popup.style.cssText += ";position:fixed;margin:0;transform:none;";
-  const rect = popup.getBoundingClientRect();
-  popup.style.left = rect.left + "px";
-  popup.style.top = rect.top + "px";
-
-  let isDragging = false, offsetX = 0, offsetY = 0;
-  handle.style.cursor = "grab";
-
-  function onMouseDown(e) {
-    if (e.target.closest("button,input,textarea,select")) return;
-    isDragging = true;
-    const r = popup.getBoundingClientRect();
-    offsetX = e.clientX - r.left;
-    offsetY = e.clientY - r.top;
-    handle.style.cursor = "grabbing";
-    document.body.style.userSelect = "none";
-  }
-  function onMouseMove(e) {
-    if (!isDragging) return;
-    popup.style.left = Math.max(0, Math.min(e.clientX - offsetX, window.innerWidth - popup.offsetWidth)) + "px";
-    popup.style.top = Math.max(0, Math.min(e.clientY - offsetY, window.innerHeight - popup.offsetHeight)) + "px";
-  }
-  function onMouseUp() {
-    isDragging = false;
-    handle.style.cursor = "grab";
-    document.body.style.userSelect = "";
-  }
-
-  handle.addEventListener("mousedown", onMouseDown);
-  document.addEventListener("mousemove", onMouseMove);
-  document.addEventListener("mouseup", onMouseUp);
-  popup._cleanupDrag = () => {
-    handle.removeEventListener("mousedown", onMouseDown);
-    document.removeEventListener("mousemove", onMouseMove);
-    document.removeEventListener("mouseup", onMouseUp);
-    delete popup._cleanupDrag;
-  };
-}
-function cleanupDrag(sel) { document.querySelector(sel)?._cleanupDrag?.(); }
-function closePopupWithCleanup() { cleanupDrag(".popup-box"); closePopup(); }
-function closePopupDataHarianWithCleanup() { cleanupDrag(".popup-dataharian-box"); closePopupDataHarian(); }
-(function setupSwipePopupBox() {
-  const box = document.querySelector(".popup-box");
-  if (!box) return;
-  let startY = 0, currentY = 0, dragging = false;
-
-  box.addEventListener("touchstart", e => {
-    if (window.innerWidth > 768) return;
-    startY   = e.touches[0].clientY;
-    currentY = startY;
-    dragging = true;
-    box.style.transition = "none";
-  }, { passive: true });
-
-  box.addEventListener("touchmove", e => {
-    if (!dragging || window.innerWidth > 768) return;
-    currentY = e.touches[0].clientY;
-    const dy = currentY - startY;
-    if (dy < 0) return;
-    e.preventDefault();
-    box.style.transform = `translateY(${dy}px)`;
-  }, { passive: false });
-
-  box.addEventListener("touchend", () => {
-    if (!dragging || window.innerWidth > 768) return;
-    dragging = false;
-    box.style.transition = "";
-    const dy = currentY - startY;
-    if (dy > 120) {
-      box.style.transform = "translateY(100%)";
-      setTimeout(() => {
-        closePopupWithCleanup();
-        box.style.transform = "";
-      }, 300);
-    } else {
-      box.style.transform = "";
-    }
-  });
-})();
-(function setupSwipeDataHarian() {
-  const box     = document.querySelector(".popup-dataharian-box");
-  const header  = document.querySelector(".popup-dataharian-header");
-  const content = document.getElementById("popupDataHarianContent");
-  if (!box || !header) return;
-
-  let startY = 0, currentY = 0, dragging = false;
-
-  // Swipe hanya dari header — bukan dari content/tombol
-  header.addEventListener("touchstart", e => {
-    if (window.innerWidth > 768) return;
-    startY = currentY = e.touches[0].clientY;
-    dragging = true;
-    box.style.transition = "none";
-  }, { passive: true });
-
-  header.addEventListener("touchmove", e => {
-    if (!dragging || window.innerWidth > 768) return;
-    currentY = e.touches[0].clientY;
-    const dy = currentY - startY;
-    if (dy < 0) return;
-    e.preventDefault();
-    box.style.transform = `translateY(${dy * 0.9}px)`;
-  }, { passive: false });
-
-  header.addEventListener("touchend", () => {
-    if (!dragging || window.innerWidth > 768) return;
-    dragging = false;
-    const dy = currentY - startY;
-    box.style.transition = "transform .28s ease";
-    if (dy > 80) {
-      box.style.transform = "translateY(100%)";
-      setTimeout(() => {
-        closePopupDataHarianWithCleanup();
-        box.style.transform = "";
-        box.style.transition = "";
-      }, 280);
-    } else {
-      box.style.transform = "";
-    }
-  });
-})();
-
-function openIndexedDB() {
-  if (dbIndexed) return Promise.resolve(dbIndexed);
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION_PENGELUARAN);
-    req.onupgradeneeded = e => {
-      const db = e.target.result;
-      if (!db.objectStoreNames.contains(STORE_LAPORAN)) {
-        db.createObjectStore(STORE_LAPORAN, { keyPath: "id" })
-          .createIndex("tanggal", "tanggal", { unique: false });
-      }
-      if (!db.objectStoreNames.contains(STORE_DATA_HARIAN)) {
-        db.createObjectStore(STORE_DATA_HARIAN, { keyPath: "id" });
-      }
-    };
-    req.onsuccess = e => { dbIndexed = e.target.result; resolve(dbIndexed); };
-    req.onerror = () => reject(req.error);
-  });
-}
-
-async function saveLaporanIndexedDB(tanggal, data) {
-  try {
-    const db = await openIndexedDB();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_LAPORAN, "readwrite");
-      tx.objectStore(STORE_LAPORAN).put({ id: tanggal, tanggal, data, updatedAt: Date.now() });
-      tx.oncomplete = () => resolve(true);
-      tx.onerror = () => reject(tx.error);
-    });
-  } catch (err) {
-    console.error("❌ save IndexedDB gagal", err);
-  }
-}
-async function getLaporanIndexedDB(tanggal) {
-  try {
-    const db = await openIndexedDB();
-    return new Promise((resolve, reject) => {
-      const req = db.transaction(STORE_LAPORAN, "readonly")
-        .objectStore(STORE_LAPORAN).get(tanggal);
-      req.onsuccess = () => resolve(req.result?.data || null);
-      req.onerror = () => reject(req.error);
-    });
-  } catch (err) {
-    console.error("❌ get IndexedDB gagal", err);
-    return null;
-  }
-}
-async function deleteLaporanIndexedDB(tanggal) {
-  try {
-    const db = await openIndexedDB();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_LAPORAN, "readwrite");
-      tx.objectStore(STORE_LAPORAN).delete(tanggal);
-      tx.oncomplete = () => resolve(true);
-      tx.onerror = () => reject(tx.error);
-    });
-  } catch (err) {
-    console.error("❌ delete cache gagal", err);
-  }
-}
-async function saveDataHarianIndexedDB(uidKurir, tanggal, data) {
-  try {
-    const db = await openIndexedDB();
-    const id = `${uidKurir}_${tanggal}`;
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_DATA_HARIAN, "readwrite");
-      tx.objectStore(STORE_DATA_HARIAN).put({ id, uidKurir, tanggal, data, updatedAt: Date.now() });
-      tx.oncomplete = () => resolve(true);
-      tx.onerror = () => reject(tx.error);
-    });
-  } catch (err) {
-    console.error("❌ save data harian gagal", err);
-  }
-}
-async function getDataHarianIndexedDB(uidKurir, tanggal) {
-  try {
-    const db = await openIndexedDB();
-    const id = `${uidKurir}_${tanggal}`;
-    return new Promise((resolve, reject) => {
-      const req = db.transaction(STORE_DATA_HARIAN, "readonly")
-        .objectStore(STORE_DATA_HARIAN).get(id);
-      req.onsuccess = () => resolve(req.result?.data ?? null);
-      req.onerror = () => reject(req.error);
-    });
-  } catch (err) {
-    console.error("❌ get data harian gagal", err);
-    return null;
-  }
-}
-async function deleteDataHarianIndexedDB(uidKurir, tanggal) {
-  try {
-    const db = await openIndexedDB();
-    const id = `${uidKurir}_${tanggal}`;
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_DATA_HARIAN, "readwrite");
-      tx.objectStore(STORE_DATA_HARIAN).delete(id);
-      tx.oncomplete = () => resolve(true);
-      tx.onerror = () => reject(tx.error);
-    });
-  } catch (err) {
-    console.error("❌ delete data harian gagal", err);
-  }
-}
-
-function formatTanggalDoc(tahun, bulan, tanggal) {
-  return `${tahun}-${String(bulan + 1).padStart(2, "0")}-${String(tanggal).padStart(2, "0")}`;
-}
-function updatePeriodTitle() {
-  const btn = document.getElementById("dataPeriodBtn");
-  if (btn) btn.innerText = `Laporan Harian ${bulanNama[selectedMonth]} ${selectedYear}`;
-}
-function launchRankingConfetti() {
-  const card = document.getElementById("rankingOmsetCard");
-  if (!card) return;
-  const colors = ["#d9b45d", "#b88a2b", "#c0c4cf", "#d79f74", "#B08A5C"];
-  for (let i = 0; i < 28; i++) {
-    const confetti = document.createElement("div");
-    confetti.className = "ranking-confetti";
-    confetti.style.left = Math.random() * 100 + "%";
-    confetti.style.background = colors[Math.floor(Math.random() * colors.length)];
-    confetti.style.animationDelay = Math.random() * 0.3 + "s";
-    card.appendChild(confetti);
-    setTimeout(() => confetti.remove(), 2200);
-  }
-}
-async function renderRankingOmset() {
-  const el = document.getElementById("rankingOmsetCard");
-  const content = document.getElementById("rankingContent");
-  const hideBtn = document.getElementById("btnHideRanking");
-  if (!el || !content) return;
-
-  content.innerHTML = `
-    <div class="ranking-loading">
-      <div class="ranking-spinner"></div>
-      <div class="ranking-loading-text">🏆 Menghitung juara hari ini...</div>
-    </div>`;
-
-  await new Promise(resolve => setTimeout(resolve, 2200));
-
-  try {
-    const today = getTanggalLocal();
-    
-    // Ambil semua kurir dari IndexedDB dataHarian
-    const db = await openIndexedDB();
-    const allHarian = await new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_DATA_HARIAN, "readonly");
-      const req = tx.objectStore(STORE_DATA_HARIAN).getAll();
-      req.onsuccess = () => resolve(req.result || []);
-      req.onerror = () => reject(req.error);
-    });
-    
-    // Filter hanya yang tanggal hari ini
-    const todayEntries = allHarian.filter(entry => entry.tanggal === today);
-    
-    if (!todayEntries.length) {
-      content.innerHTML = `
-        <div class="ranking-placeholder">Belum ada data hari ini</div>
-        <button id="btnShowRanking" class="ranking-btn">Refresh</button>`;
-      return;
-    }
-    
-    const ranking = todayEntries
-      .map(entry => ({
-        nama: entry.data?.nama || entry.uidKurir,
-        omset: Number(entry.data?.pembayaran?.bayarKonsumen || 0)
-      }))
-      .sort((a, b) => b.omset - a.omset)
-      .slice(0, 3);
-
-    content.innerHTML = `
-      <div class="ranking-list">
-        ${ranking.map((item, index) => `
-          <div class="ranking-item">
-            <div class="ranking-left">
-              <div class="rank-badge rank-${index + 1}">${index + 1}</div>
-              <div class="rank-name">${escapeHtml(item.nama)}</div>
-            </div>
-            <div class="rank-omset">Rp ${item.omset.toLocaleString("id-ID")}</div>
-          </div>`).join("")}
-        <button id="btnShowRanking" class="ranking-btn" style="margin-top:14px;">Refresh</button>
+        <i class="fa-solid fa-chevron-right dh-kurir-arrow"></i>
       </div>`;
-
-    hideBtn?.classList.remove("hidden");
-    launchRankingConfetti();
-  } catch (err) {
-    console.error(err);
-  }
-}
-function restoreFilterUI() {
-  document.querySelectorAll(".data-filter-btn").forEach(btn => {
-    btn.classList.toggle("active", btn.dataset.filter === laporanFilter);
-  });
-}
-
-async function loadLaporanAdminTanggal(tanggalDoc, forceReload = false) {
-  const user = auth.currentUser;
-  if (!user) return null;
-
-  if (forceReload) {
-    try {
-      console.log("🔄 Reload Firestore", tanggalDoc);
-      delete cacheLaporanAdmin[tanggalDoc];
-      await deleteLaporanIndexedDB(tanggalDoc);
-
-      const snap = await getDoc(doc(db, "users", user.uid, "laporanAdmin", tanggalDoc));
-      const data = snap.exists() ? snap.data() : null;
-      cacheLaporanAdmin[tanggalDoc] = data;
-      if (data !== null) await saveLaporanIndexedDB(tanggalDoc, data);
-      return data;
-    } catch (err) {
-      console.error("❌ Reload Firestore gagal", err);
-      return null;
-    }
-  }
-
-  if (cacheLaporanAdmin[tanggalDoc] !== undefined) return cacheLaporanAdmin[tanggalDoc];
-
-  const indexedData = await getLaporanIndexedDB(tanggalDoc);
-  if (indexedData !== null) {
-    cacheLaporanAdmin[tanggalDoc] = indexedData;
-    return indexedData;
-  }
-
-  cacheLaporanAdmin[tanggalDoc] = undefined;
-  return undefined;
-}
-async function renderLaporanHarian() {
-  const listEl = document.getElementById("laporanHarianList");
-  if (!listEl) return;
-
-  const hariNama = ["Minggu","Senin","Selasa","Rabu","Kamis","Jumat","Sabtu"];
-  const totalHari = new Date(selectedYear, selectedMonth + 1, 0).getDate();
-  const today = getTanggalLocal();
-  const tanggalList = [];
-
-  for (let tgl = 1; tgl <= totalHari; tgl++) {
-    const tDoc = formatTanggalDoc(selectedYear, selectedMonth, tgl);
-    if (laporanFilter === "aktif" && tDoc !== today) continue;
-    const namaHari = hariNama[new Date(selectedYear, selectedMonth, tgl).getDay()];
-    tanggalList.push({ tDoc, tgl, namaHari });
-  }
-
-  listEl.innerHTML = tanggalList.map(({ tDoc }) =>
-    `<div class="lh-block" id="lh-block-${tDoc}">
-       <div class="lh-loading">Memuat...</div>
-     </div>`
-  ).join("");
-
-  for (const { tDoc, tgl, namaHari } of tanggalList) {
-    try {
-      const data = await loadLaporanAdminTanggal(tDoc, false);
-      cacheLaporanAdmin[tDoc] = data;
-      await renderLaporanTable(tDoc, tgl, namaHari);
-      const block = document.getElementById(`lh-block-${tDoc}`);
-      if (!block) continue;
-      const users = data
-        ? Object.values(data).filter(v => typeof v === "object" && v?.nama)
-        : [];
-      const adaKurang = users.some(v =>
-        v?.pembayaran?.nota?.status?.toLowerCase() === "kurang"
-      );
-      block.classList.toggle("lh-kurang", adaKurang);
-      if (laporanFilter === "tunggakan") {
-        block.style.display = adaKurang ? "" : "none";
-      }
-    } catch (err) {
-      console.error("Gagal render laporan", tDoc, err);
-    }
-  }
-}
-async function renderLaporanTable(tDoc, tgl, namaHari) {
-  const block = document.getElementById(`lh-block-${tDoc}`);
-  if (!block) return;
-
-  // ambil varian dari IndexedDB laporanDistribusiDB store users (adminCabang)
-  const varian = await new Promise(resolve => {
-    try {
-      const req = indexedDB.open("laporanDistribusiDB");
-      req.onsuccess = () => {
-        try {
-          const idb = req.result;
-          const tx  = idb.transaction("users", "readonly");
-          const all = tx.objectStore("users").getAll();
-          all.onsuccess = () => {
-            const admin = all.result.find(u =>
-              u.role === "adminCabang" && Array.isArray(u.varian)
-            );
-            if (admin?.varian) {
-              resolve(
-                admin.varian
-                  .filter(v => { const k = Object.keys(v)[0]; return k && v[k]?.isAktif === true; })
-                  .map(v => Object.keys(v)[0])
-              );
-            } else resolve([]);
-          };
-          all.onerror = () => resolve([]);
-        } catch { resolve([]); }
-      };
-      req.onerror = () => resolve([]);
-    } catch { resolve([]); }
-  });
-
-  const data  = cacheLaporanAdmin[tDoc];
-  const users = data
-    ? Object.values(data).filter(v => typeof v === "object" && v?.nama)
-    : [];
-  const isDummy = false;
-
-  const V = varian.length ? varian : ["CB","BB","BK","MC"];
-  const vLen = V.length;
-
-  const tglLabel = `${namaHari}, ${tgl} ${bulanNama[selectedMonth]} ${selectedYear}`;
-
-  const COLS = [
-    { key: "order",      label: "Order",       src: u => u.order },
-    { key: "fee",        label: "Fee",          src: u => u.fee },
-    { key: "offFlavor",  label: "Off Flavor",   src: u => u.offFlavor },
-    { key: "sisaBarang", label: "Sisa Barang",  src: u => u.sisaBarang },
-    { key: "closing",    label: "Closing",      src: u => u?.pembayaran?.closing },
-  ];
-
-  // ── THEAD ──
-  const th1NoTgl = [
-    `<td rowspan="2" class="lh-th lh-th-nama">Nama</td>`,
-    ...COLS.map(c => `<td colspan="${vLen}" class="lh-th lh-th-grp lh-grp-${c.key}">${c.label}</td>`),
-    `<td rowspan="2" class="lh-th lh-th-bayar">Pembayaran</td>`,
-    `<td rowspan="2" class="lh-th lh-th-ket">Keterangan</td>`,
-  ].join("");
-
-  const th2 = COLS.map(() =>
-    V.map(v => `<td class="lh-th lh-th-v">${v}</td>`).join("")
-  ).join("");
-
-  // ── BODY ──
-  const sums = {};
-  COLS.forEach(c => { sums[c.key] = {}; V.forEach(v => { sums[c.key][v] = 0; }); });
-  let sumBayar = 0;
-
-  const bodyRowsNoTgl = users.map((u, idx) => {
-    const cells = COLS.map(c => {
-      const src = c.src(u) || {};
-      return V.map(v => {
-        const val = Number(src[v] || 0);
-        sums[c.key][v] = (sums[c.key][v] || 0) + val;
-        return `<td class="lh-td lh-td-${c.key}">${val || ""}</td>`;
-      }).join("");
-    }).join("");
-
-    const bayar  = Number(u?.pembayaran?.nota?.bayar || 0);
-    const status = u?.pembayaran?.nota?.status || "-";
-    const ket    = Number(u?.pembayaran?.nota?.keterangan || 0);
-    sumBayar    += bayar;
-
-    let ketHtml = status, ketCls = "";
-    if (status.toLowerCase() === "kurang") {
-      ketHtml = `Kurang ${Math.abs(ket).toLocaleString("id-ID")}`;
-      ketCls  = "lh-ket-kurang";
-    } else if (status.toLowerCase() === "lebih") {
-      ketHtml = `Lebih ${ket.toLocaleString("id-ID")}`;
-      ketCls  = "lh-ket-lebih";
-    }
-
-    return `<tr class="lh-tr${isDummy ? " lh-dummy" : ""}">
-      <td class="lh-td lh-td-nama">${escapeHtml(u.nama)}</td>
-      ${cells}
-      <td class="lh-td lh-td-bayar">${bayar ? bayar.toLocaleString("id-ID") : ""}</td>
-      <td class="lh-td lh-td-ket ${ketCls}">${ketHtml}</td>
-    </tr>`;
   }).join("");
 
-  // ── SUM ROW ──
-  const sumCells = COLS.map(c =>
-    V.map(v => `<td class="lh-td lh-sum-td lh-td-${c.key}">${sums[c.key][v] || ""}</td>`).join("")
-  ).join("");
+  listEl.querySelectorAll(".dh-kurir-item").forEach(item => {
+    item.addEventListener("click", () => {
+      listEl.querySelectorAll(".dh-kurir-item").forEach(x => x.classList.remove("active"));
+      item.classList.add("active");
+      const uid  = item.dataset.uid;
+      const user = users.find(u => u.uid === uid);
+      selectDhKurir(user);
+    });
 
-  const sumRow = `<tr class="lh-tr-sum">
-    <td class="lh-sum-label">Total</td>
-    ${sumCells}
-    <td class="lh-td lh-sum-td">${sumBayar ? sumBayar.toLocaleString("id-ID") : ""}</td>
-    <td class="lh-td lh-sum-td">—</td>
+    let pressTimer = null;
+    item.addEventListener("pointerdown", () => {
+      pressTimer = setTimeout(() => {
+        const uid  = item.dataset.uid;
+        const user = users.find(u => u.uid === uid);
+        if (user) openCatatanKurir(user);
+      }, 600);
+    });
+    item.addEventListener("pointerup",     () => clearTimeout(pressTimer));
+    item.addEventListener("pointercancel", () => clearTimeout(pressTimer));
+    item.addEventListener("pointermove",   () => clearTimeout(pressTimer));
+  });
+}
+
+/* ── SELECT KURIR ── */
+async function selectDhKurir(user) {
+  if (!user) return;
+  activeKurirUid  = user.uid;
+  activeKurirUser = user;
+
+  const empty   = document.getElementById("dhDetailEmpty");
+  const content = document.getElementById("dhDetailContent");
+  const wrapper = document.getElementById("dhDetailWrapper");
+
+  if (empty)   empty.style.display   = "none";
+  if (content) content.style.display = "flex";
+  if (wrapper) wrapper.classList.add("show");
+
+  if (window.innerWidth <= 768) {
+    const backBtn = document.getElementById("topbarBackBtn");
+    if (backBtn) backBtn.style.display = "flex";
+  }
+
+  const nama    = user.nama || "Tanpa Nama";
+  const inisial = nama.trim().charAt(0).toUpperCase();
+
+  const avatarEl = document.getElementById("dhDetailAvatar");
+  if (avatarEl) avatarEl.innerHTML = user.foto
+    ? `<img src="${esc(user.foto)}" alt="${esc(nama)}">`
+    : inisial;
+
+  const namaEl = document.getElementById("dhDetailNama");
+  if (namaEl) namaEl.textContent = nama;
+
+  const roleEl = document.getElementById("dhDetailRole");
+  if (roleEl) roleEl.textContent = user.role || "-";
+
+  const dateEl = document.getElementById("dhDetailDate");
+  if (dateEl && !dateEl.value) dateEl.value = getTanggalLocal();
+
+  await renderDhForm();
+  await renderDhRingkasan();
+
+  const reloadBtn = document.getElementById("dhReloadBtn");
+  if (reloadBtn) {
+    reloadBtn.onclick = async () => {
+      reloadBtn.classList.add("spinning");
+      reloadBtn.disabled = true;
+      const tanggal = document.getElementById("dhDetailDate")?.value || getTanggalLocal();
+      await window.idb.clearDataHarian(activeKurirUid, tanggal);
+      await renderDhRingkasan(true);
+      reloadBtn.classList.remove("spinning");
+      reloadBtn.disabled = false;
+    };
+  }
+
+  // guard: hapus listener lama pakai clone
+  const dateInput = document.getElementById("dhDetailDate");
+  if (dateInput) {
+    const newDate = dateInput.cloneNode(true);
+    dateInput.parentNode.replaceChild(newDate, dateInput);
+    newDate.addEventListener("change", async () => {
+      await renderDhForm();
+      await renderDhRingkasan();
+    });
+  }
+}
+
+/* ── RENDER FORM INPUT ── */
+async function renderDhForm() {
+  const formPanel = document.getElementById("dhFormBody")?.closest(".dh-form-panel");
+  const formBody  = document.getElementById("dhFormBody");
+  if (!formBody) return;
+
+  document.querySelectorAll(".dh-simpan-wrap").forEach(el => el.remove());
+
+  const tanggal = document.getElementById("dhDetailDate")?.value || getTanggalLocal();
+  let existing  = {};
+  try {
+    const snap = await window.getDoc(
+      window.doc(window.db, "users", activeKurirUid, "laporanMarketing", tanggal)
+    );
+    if (snap.exists()) existing = snap.data();
+  } catch {}
+
+  const admin  = (window.usersCache || []).find(u => u.role === "adminCabang");
+  const varian = (admin?.varian || [])
+    .filter(v => { const k = Object.keys(v)[0]; return k && v[k]?.isAktif; })
+    .map(v => Object.keys(v)[0]);
+
+  if (!varian.length) {
+    formBody.innerHTML = `<div class="dh-ringkasan-empty">Varian tidak ditemukan</div>`;
+    return;
+  }
+
+  const rows = [
+    { key: "order",      label: "Order" },
+    { key: "fee",        label: "Fee" },
+    { key: "offflavor",  label: "Off Flavor" },
+    { key: "sisabarang", label: "Sisa Barang" },
+  ];
+
+  const inputRows = rows.map(r => `
+    <div class="dh-form-row">
+      <div class="dh-form-label">${r.label}</div>
+      <div class="dh-form-inputs">
+        ${varian.map(v => `
+          <input type="number" min="0" class="dh-form-input"
+            data-type="${r.key}" data-varian="${esc(v)}" placeholder="${esc(v)}">`
+        ).join("")}
+      </div>
+    </div>`).join("");
+
+  const closingRow = `
+    <div class="dh-form-row dh-form-row-closing">
+      <div class="dh-form-label dh-form-label-closing">Closing</div>
+      <div class="dh-form-inputs">
+        ${varian.map(v => `
+          <div class="dh-form-closing" data-varian="${esc(v)}" title="${esc(v)}">0</div>`
+        ).join("")}
+      </div>
+    </div>`;
+
+  const pembayaranRow = `
+    <div class="dh-form-row">
+      <div class="dh-form-label">Pembayaran</div>
+      <div class="dh-form-inputs dh-inputs-bayar">
+        <input type="text" inputmode="numeric" class="dh-form-input dh-input-bayar"
+          data-type="pembayaran" placeholder="0">
+      </div>
+    </div>
+    <div class="dh-tagihan-wrap">
+      <div class="dh-tagihan-row">
+        <span class="dh-tagihan-label">Total Tagihan</span>
+        <span class="dh-tagihan-value" id="dhTagihanValue">Rp 0</span>
+      </div>
+      <div class="dh-tagihan-ket" id="dhTagihanKet"></div>
+    </div>
+    <div class="dh-harga-wrap">
+      <div class="dh-harga-title">Keterangan Harga Varian</div>
+      ${varian.map(v => {
+        const harga = activeKurirUser?.varian?.find(item => Object.keys(item)[0] === v)?.[v]?.hargaProduksi || 0;
+        return `<div class="dh-harga-row">
+          <span class="dh-harga-key">${esc(v)}</span>
+          <span class="dh-harga-val">Rp ${Number(harga).toLocaleString("id-ID")}</span>
+        </div>`;
+      }).join("")}
+    </div>`;
+
+  formBody.innerHTML = inputRows + closingRow + pembayaranRow;
+
+  formBody.closest(".dh-form-panel").insertAdjacentHTML("beforeend", `
+    <div class="dh-simpan-wrap">
+      <button class="dh-simpan-btn" id="dhSimpanBtn">Simpan</button>
+    </div>`);
+
+  // isi dari existing
+  const fieldMap = { order:"order", fee:"fee", offflavor:"offFlavor", sisabarang:"sisaBarang" };
+  Object.entries(fieldMap).forEach(([type, fsField]) => {
+    const data = existing[fsField] || {};
+    Object.entries(data).forEach(([v, val]) => {
+      const input = formBody.querySelector(`.dh-form-input[data-type="${type}"][data-varian="${v}"]`);
+      if (input && val) input.value = val;
+    });
+  });
+  const bayar = existing?.pembayaran?.nota?.bayar || 0;
+  const bayarInput = formBody.querySelector(".dh-input-bayar");
+  if (bayarInput && bayar) bayarInput.value = Number(bayar).toLocaleString("id-ID");
+
+  formBody.querySelectorAll(".dh-form-input:not(.dh-input-bayar)").forEach(input => {
+    input.addEventListener("input", hitungClosing);
+  });
+  hitungClosing();
+
+  formBody.querySelector(".dh-input-bayar")?.addEventListener("input", e => {
+    const angka = e.target.value.replace(/\D/g, "");
+    e.target.value = angka ? Number(angka).toLocaleString("id-ID") : "";
+    hitungTagihan();
+  });
+
+  document.getElementById("dhSimpanBtn")?.addEventListener("click", async () => {
+    const btn     = document.getElementById("dhSimpanBtn");
+    const tanggal = document.getElementById("dhDetailDate")?.value;
+    if (!tanggal) { window.showToast("Pilih tanggal dulu", "error"); return; }
+
+    btn.disabled    = true;
+    btn.textContent = "Menyimpan...";
+
+    try {
+      const adminUid  = window.auth?.currentUser?.uid;
+      const adminSnap = await window.getDoc(window.doc(window.db, "users", adminUid));
+      const idCabang  = adminSnap.exists() ? (adminSnap.data().idCabang || "") : "";
+
+      const hasil = {};
+      document.querySelectorAll(".dh-form-input:not(.dh-input-bayar)").forEach(input => {
+        const type   = input.dataset.type;
+        const varian = input.dataset.varian;
+        const val    = Number(input.value) || 0;
+        if (!hasil[type]) hasil[type] = {};
+        if (val > 0) hasil[type][varian] = val;
+      });
+
+      const bayarRaw = document.querySelector(".dh-input-bayar")?.value || "";
+      const bayar    = Number(bayarRaw.replace(/\./g, "")) || 0;
+
+      const closingData = {};
+      document.querySelectorAll(".dh-form-closing").forEach(el => {
+        const v = el.dataset.varian;
+        const c = Number(el.textContent) || 0;
+        if (c !== 0) closingData[v] = c;
+      });
+
+      const hargaMap = {};
+      (activeKurirUser?.varian || []).forEach(v => {
+        const key = Object.keys(v)[0];
+        if (key) hargaMap[key] = Number(v[key]?.hargaProduksi) || 0;
+      });
+      let totalTagihan = 0;
+      Object.entries(closingData).forEach(([k, c]) => { totalTagihan += c * (hargaMap[k] || 0); });
+      const selisih = bayar - totalTagihan;
+      const status  = selisih === 0 ? "Lunas" : selisih < 0 ? "Kurang" : "Lebih";
+
+      const laporanRef = window.doc(window.db, "users", activeKurirUid, "laporanMarketing", tanggal);
+      await window.setDoc(laporanRef, {
+        createdBy:   adminUid,
+        idMarketing: activeKurirUid,
+        idCabang, tanggal,
+        order:      hasil.order      || {},
+        fee:        hasil.fee        || {},
+        offFlavor:  hasil.offflavor  || {},
+        sisaBarang: hasil.sisabarang || {},
+        pembayaran: {
+          closing: { ...closingData, createdAt: window.serverTimestamp() },
+          nota: { bayar, keterangan: selisih, status }
+        },
+        updatedAt: window.serverTimestamp()
+      }, { merge: true });
+      // update bawaBarang di users — semua varian termasuk yang 0
+      const admin = (window.usersCache || []).find(u => u.role === "adminCabang");
+      const semuaVarian = (admin?.varian || [])
+        .filter(v => { const k = Object.keys(v)[0]; return k && v[k]?.isAktif; })
+        .map(v => Object.keys(v)[0]);
+      const bawaBarangArr = semuaVarian.map(k => ({
+        [k]: { bawa: Number(hasil.order?.[k]) || 0 }
+      }));
+      await window.setDoc(
+        window.doc(window.db, "users", activeKurirUid),
+        {
+          bawaBarang: bawaBarangArr,
+          bawaBarangUpdate: window.serverTimestamp()
+        },
+        { merge: true }
+      );
+      // update IDB dengan nota
+      try {
+        const existingDh = await window.idb.getDataHarian(activeKurirUid, tanggal);
+        if (existingDh) {
+          await window.idb.saveDataHarian(activeKurirUid, tanggal, {
+            ...existingDh,
+            nota: { bayar, keterangan: selisih, status }
+          });
+        }
+      } catch {}
+      // mirror ke laporanAdmin
+      try {
+        const kurirNama = activeKurirUser?.nama || "";
+        const laporanAdminRef = window.doc(window.db, "users", adminUid, "laporanAdmin", tanggal);
+        await window.setDoc(laporanAdminRef, {
+          [activeKurirUid]: {
+            nama:       kurirNama,
+            order:      hasil.order      || {},
+            fee:        hasil.fee        || {},
+            offFlavor:  hasil.offflavor  || {},
+            sisaBarang: hasil.sisabarang || {},
+            pembayaran: {
+              closing: closingData,
+              nota: { bayar, keterangan: selisih, status }
+            },
+            createdBy: adminUid
+          }
+        }, { merge: true });
+      } catch (err) {
+        console.error("❌ mirror laporanAdmin:", err);
+      }
+      window.showToast("Berhasil disimpan", "success");
+    } catch (err) {
+      console.error("❌ simpan dataharian:", err);
+      window.showToast("Gagal menyimpan", "error");
+    } finally {
+      btn.disabled    = false;
+      btn.textContent = "Simpan";
+    }
+  });
+}
+
+/* ── HITUNG TAGIHAN ── */
+function hitungTagihan() {
+  const tagihanEl = document.getElementById("dhTagihanValue");
+  const ketEl     = document.getElementById("dhTagihanKet");
+  if (!tagihanEl || !ketEl) return;
+
+  const hargaMap = {};
+  (activeKurirUser?.varian || []).forEach(v => {
+    const key = Object.keys(v)[0];
+    if (key) hargaMap[key] = Number(v[key]?.hargaProduksi) || 0;
+  });
+
+  let totalTagihan = 0;
+  document.querySelectorAll(".dh-form-closing").forEach(el => {
+    totalTagihan += (Number(el.textContent) || 0) * (hargaMap[el.dataset.varian] || 0);
+  });
+
+  tagihanEl.textContent = "Rp " + totalTagihan.toLocaleString("id-ID");
+
+  const bayar   = Number((document.querySelector(".dh-input-bayar")?.value || "").replace(/\./g, "")) || 0;
+  const selisih = bayar - totalTagihan;
+
+  if (bayar === 0) {
+    ketEl.textContent = ""; ketEl.className = "dh-tagihan-ket";
+  } else if (selisih === 0) {
+    ketEl.textContent = "Lunas"; ketEl.className = "dh-tagihan-ket dh-ket-lunas";
+  } else if (selisih < 0) {
+    ketEl.textContent = `Kurang Rp ${Math.abs(selisih).toLocaleString("id-ID")}`;
+    ketEl.className = "dh-tagihan-ket dh-ket-kurang";
+  } else {
+    ketEl.textContent = `Lebih Rp ${selisih.toLocaleString("id-ID")}`;
+    ketEl.className = "dh-tagihan-ket dh-ket-lebih";
+  }
+}
+
+/* ── HITUNG CLOSING ── */
+function hitungClosing() {
+  document.querySelectorAll(".dh-form-closing").forEach(el => {
+    const v = el.dataset.varian;
+    const get = type => Number(
+      document.querySelector(`.dh-form-input[data-type="${type}"][data-varian="${v}"]`)?.value || 0
+    );
+    el.textContent = get("order") - get("fee") - get("offflavor") - get("sisabarang") || "0";
+  });
+  hitungTagihan();
+}
+
+/* ── RENDER RINGKASAN ── */
+async function renderDhRingkasan(forceReload = false) {
+  const body = document.getElementById("dhRingkasanBody");
+  if (!body) return;
+
+  body.innerHTML = `<div class="dh-ringkasan-empty">Memuat...</div>`;
+
+  const tanggal  = document.getElementById("dhDetailDate")?.value || getTanggalLocal();
+  const uidKurir = activeKurirUid;
+
+  let data = await window.idb.getDataHarian(uidKurir, tanggal);
+
+  if (forceReload) {
+    data = await fetchDataHarian(uidKurir, tanggal);
+    if (data) await window.idb.saveDataHarian(uidKurir, tanggal, data);
+  }
+
+  if (!data) {
+    body.innerHTML = `<div class="dh-ringkasan-empty">Belum ada data</div>`;
+    return;
+  }
+
+  renderRingkasanUI(body, data);
+}
+
+/* ── FETCH DATA HARIAN ── */
+async function fetchDataHarian(uidKurir, tanggal) {
+  try {
+    const idCabang = window.currentUser?.idCabang || "";
+    if (!idCabang) return null;
+    const hasil = {
+      fee: {}, disable: {}, closing: {}, expired: {}, pay: {}, saldoBarang: {},
+      penjualanLangsung: {},
+      kunjungan: 0,
+      pembayaran: { bayarKonsumen: 0, bayarProduksi: 0 },
+      keterangan: { pending: 0, tutup: 0, putus: 0 },
+      customerNew: 0, customerLama: 0, customerTambahan: 0
+    };
+
+    const snap = await window.getDocs(window.query(
+      window.collectionGroup(window.db, "dataHarian"),
+      window.where("idCabang", "==", idCabang),
+      window.where("pemilik",  "==", uidKurir),
+      window.where("tanggal",  "==", tanggal)
+    ));
+
+    hasil.kunjungan = snap.size;
+
+    snap.forEach(docSnap => {
+      const d = docSnap.data();
+      ["fee","disable","closing","expired","pay"].forEach(f => {
+        if (!d[f] || typeof d[f] !== "object") return;
+        Object.entries(d[f]).forEach(([k, v]) => {
+          hasil[f][k] = (hasil[f][k] || 0) + (Number(v) || 0);
+        });
+      });
+      if (d.pembayaran) {
+        hasil.pembayaran.bayarKonsumen += Number(d.pembayaran?.bayarKonsumen) || 0;
+        hasil.pembayaran.bayarProduksi += Number(d.pembayaran?.bayarProduksi) || 0;
+      }
+      const status = d?.keterangan?.status?.trim()?.toLowerCase();
+      if (status === "pending") hasil.keterangan.pending++;
+      else if (status === "tutup") hasil.keterangan.tutup++;
+      else if (status === "putus") hasil.keterangan.putus++;
+    });
+
+    // query penjualanLangsung — tambahkan ke pay dan omset
+    try {
+      const snapPL = await window.getDocs(window.query(
+        window.collectionGroup(window.db, "penjualanLangsung"),
+        window.where("idCabang", "==", idCabang),
+        window.where("pemilik",  "==", uidKurir),
+        window.where("tanggal",  "==", tanggal)
+      ));
+      snapPL.forEach(docSnap => {
+        const d = docSnap.data();
+        if (d.pay && typeof d.pay === "object") {
+          Object.entries(d.pay).forEach(([k, v]) => {
+            hasil.pay[k] = (hasil.pay[k] || 0) + (Number(v) || 0);
+          });
+        }
+        if (d.closing && typeof d.closing === "object") {
+          Object.entries(d.closing).forEach(([k, v]) => {
+            hasil.closing[k] = (hasil.closing[k] || 0) + (Number(v) || 0);
+          });
+        }
+        if (d.pay && typeof d.pay === "object") {
+          Object.entries(d.pay).forEach(([k, v]) => {
+            hasil.penjualanLangsung[k] = (hasil.penjualanLangsung[k] || 0) + (Number(v) || 0);
+          });
+        }
+        if (d.pembayaran) {
+          hasil.pembayaran.bayarKonsumen += Number(d.pembayaran?.bayarKonsumen) || 0;
+        }
+      });
+    } catch (err) { console.warn("❌ query penjualanLangsung:", err.message); }
+
+    try {
+      const lmSnap = await window.getDoc(
+        window.doc(window.db, "users", uidKurir, "laporanMarketing", tanggal)
+      );
+      const order = lmSnap.exists() ? (lmSnap.data().order || {}) : {};
+      const allKeys = new Set([
+        ...Object.keys(order),
+        ...Object.keys(hasil.closing),
+        ...Object.keys(hasil.fee),
+        ...Object.keys(hasil.disable),
+        ...Object.keys(hasil.penjualanLangsung)
+      ]);
+      allKeys.forEach(k => {
+        hasil.saldoBarang[k] =
+          (Number(order[k]) || 0) -
+          (Number(hasil.closing[k]) || 0) -
+          (Number(hasil.fee[k]) || 0) -
+          (Number(hasil.disable[k]) || 0);
+      });
+    } catch {}
+
+    // query customer
+    try {
+      const hariNama  = ["Minggu","Senin","Selasa","Rabu","Kamis","Jumat","Sabtu"];
+      const hariFilter = hariNama[new Date(tanggal + "T00:00:00").getDay()];
+      const startDate  = new Date(tanggal + "T00:00:00");
+      const endDate    = new Date(startDate); endDate.setDate(endDate.getDate() + 1);
+      const startTs    = window.Timestamp?.fromDate?.(startDate);
+      const endTs      = window.Timestamp?.fromDate?.(endDate);
+
+      if (startTs && endTs) {
+        // customer baru
+        const cnSnap = await window.getDocs(window.query(
+          window.collection(window.db, "customer"),
+          window.where("idCabang", "==", idCabang),
+          window.where("pemilik",  "==", uidKurir),
+          window.where("createdBy","==", uidKurir),
+          window.where("acc",      "==", true),
+          window.where("createdAt",">=", startTs),
+          window.where("createdAt","<",  endTs)
+        ));
+        hasil.customerNew = cnSnap.size;
+
+        // customer lama
+        const clSnap = await window.getDocs(window.query(
+          window.collection(window.db, "customer"),
+          window.where("idCabang", "==", idCabang),
+          window.where("pemilik",  "==", uidKurir),
+          window.where("hari",     "==", hariFilter),
+          window.where("isNew",    "==", false)
+        ));
+        hasil.customerLama = clSnap.docs.filter(d => !("acc" in d.data())).length;
+
+        // customer tambahan
+        const ctSnap = await window.getDocs(window.query(
+          window.collection(window.db, "customer"),
+          window.where("idCabang", "==", idCabang),
+          window.where("pemilik",  "==", uidKurir),
+          window.where("hari",     "==", hariFilter),
+          window.where("isNew",    "==", true)
+        ));
+        hasil.customerTambahan = ctSnap.docs.filter(d => !("acc" in d.data())).length;
+      }
+    } catch (err) { console.warn("❌ query customer:", err.message); }
+
+    return hasil;
+  } catch (err) {
+    console.error("❌ fetchDataHarian:", err);
+    return null;
+  }
+}
+
+/* ── RENDER RINGKASAN UI ── */
+function renderRingkasanUI(body, data) {
+  const varian = (activeKurirUser?.varian || [])
+    .filter(v => { const k = Object.keys(v)[0]; return k && v[k]?.isAktif; })
+    .map(v => Object.keys(v)[0]);
+
+  const renderRow = (label, obj, cls) => `
+    <div class="dh-ring-row-wrap">
+      <div class="dh-ring-row-label">${label}</div>
+      <div class="dh-ring-row-vals">
+        ${varian.map(v => `
+          <div class="dh-ring-val-box ${cls}">
+            <div class="dh-ring-val-key">${esc(v)}</div>
+            <div class="dh-ring-val-num">${Number(obj[v] || 0).toLocaleString("id-ID")}</div>
+          </div>`).join("")}
+      </div>
+    </div>`;
+
+  body.innerHTML = `
+    <div class="dh-ring-omset-card">
+      <span class="dh-ring-omset-label">Total Omset</span>
+      <span class="dh-ring-omset-val">Rp ${Number(data.pembayaran?.bayarKonsumen || 0).toLocaleString("id-ID")}</span>
+    </div>
+    ${renderRow("Closing",      data.closing,     "ring-closing")}
+    ${renderRow("Fee",          data.fee,         "ring-fee")}
+    ${renderRow("Disable",      data.disable,     "ring-disable")}
+    ${renderRow("Expired",      data.expired,     "ring-expired")}
+    ${renderRow("Pay",          data.pay,         "ring-pay")}
+    ${renderRow("Penjualan Langsung", data.penjualanLangsung || {}, "ring-pl")}
+    ${renderRow("Saldo Barang", data.saldoBarang, "ring-saldo")}
+    <div class="dh-ring-row-wrap">
+      <div class="dh-ring-row-label">Customer</div>
+      <div class="dh-ring-row-vals">
+        <div class="dh-ring-val-box ring-customer"><div class="dh-ring-val-key">Lama</div><div class="dh-ring-val-num">${data.customerLama || 0}</div></div>
+        <div class="dh-ring-val-box ring-customer"><div class="dh-ring-val-key">Tambahan</div><div class="dh-ring-val-num">${data.customerTambahan || 0}</div></div>
+        <div class="dh-ring-val-box ring-customer"><div class="dh-ring-val-key">Baru</div><div class="dh-ring-val-num">${data.customerNew || 0}</div></div>
+        <div class="dh-ring-val-box ring-customer"><div class="dh-ring-val-key">Kunjungan</div><div class="dh-ring-val-num">${data.kunjungan || 0}</div></div>
+      </div>
+    </div>
+    <div class="dh-ring-row-wrap">
+      <div class="dh-ring-row-label">Keterangan</div>
+      <div class="dh-ring-row-vals">
+        <div class="dh-ring-val-box ring-ket"><div class="dh-ring-val-key">Tutup</div><div class="dh-ring-val-num">${data.keterangan?.tutup || 0}</div></div>
+        <div class="dh-ring-val-box ring-ket"><div class="dh-ring-val-key">Pending</div><div class="dh-ring-val-num">${data.keterangan?.pending || 0}</div></div>
+        <div class="dh-ring-val-box ring-ket"><div class="dh-ring-val-key">Putus</div><div class="dh-ring-val-num">${data.keterangan?.putus || 0}</div></div>
+      </div>
+    </div>`;
+}
+/* ── TABEL REKAP STATE ── */
+const BULAN_NAMA = ["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
+let tabelBulan  = new Date().getMonth();
+let tabelTahun  = new Date().getFullYear();
+let tabelFilter = localStorage.getItem("dhTabelFilter") || "semua";
+
+function initTabelRekap() {
+  updateTabelPeriodLabel();
+  restoreTabelFilter();
+  renderTabelLaporan();
+
+  // period btn
+  document.getElementById("dhTabelPeriodBtn")?.addEventListener("click", () => {
+    buildPeriodPopup();
+    document.getElementById("dhPeriodOverlay")?.classList.add("show");
+  });
+
+  // close btn
+  document.getElementById("dhTabelCloseBtn")?.addEventListener("click", () => {
+    document.getElementById("dhTabelWrapper")?.classList.remove("show");
+    const bottomNav = document.getElementById("bottomNav");
+    if (bottomNav) bottomNav.style.display = "";
+  });
+
+  // period apply
+  document.getElementById("dhPeriodApply")?.addEventListener("click", () => {
+    document.getElementById("dhPeriodOverlay")?.classList.remove("show");
+    updateTabelPeriodLabel();
+    renderTabelLaporan();
+  });
+
+  // overlay close
+  document.getElementById("dhPeriodOverlay")?.addEventListener("click", e => {
+    if (e.target.id === "dhPeriodOverlay")
+      document.getElementById("dhPeriodOverlay")?.classList.remove("show");
+  });
+
+  // filter chips
+  document.querySelectorAll(".dh-tabel-chip").forEach(chip => {
+    chip.addEventListener("click", () => {
+      tabelFilter = chip.dataset.filter;
+      localStorage.setItem("dhTabelFilter", tabelFilter);
+      restoreTabelFilter();
+      renderTabelLaporan();
+    });
+  });
+}
+
+function updateTabelPeriodLabel() {
+  const el = document.getElementById("dhTabelPeriodLabel");
+  if (el) el.textContent = `Laporan Harian ${BULAN_NAMA[tabelBulan]} ${tabelTahun}`;
+}
+
+function restoreTabelFilter() {
+  document.querySelectorAll(".dh-tabel-chip").forEach(c => {
+    c.classList.toggle("active", c.dataset.filter === tabelFilter);
+  });
+}
+
+function buildPeriodPopup() {
+  const bulanEl = document.getElementById("dhPeriodBulan");
+  const tahunEl = document.getElementById("dhPeriodTahun");
+  if (!bulanEl || !tahunEl) return;
+
+  bulanEl.innerHTML = BULAN_NAMA.map((b, i) => `
+    <div class="dh-period-opt ${i === tabelBulan ? "active" : ""}" data-bulan="${i}">${b.slice(0,3)}</div>
+  `).join("");
+
+  const curYear = new Date().getFullYear();
+  tahunEl.innerHTML = [curYear-1, curYear, curYear+1].map(y => `
+    <div class="dh-period-opt ${y === tabelTahun ? "active" : ""}" data-tahun="${y}">${y}</div>
+  `).join("");
+
+  bulanEl.querySelectorAll(".dh-period-opt").forEach(opt => {
+    opt.addEventListener("click", () => {
+      bulanEl.querySelectorAll(".dh-period-opt").forEach(o => o.classList.remove("active"));
+      opt.classList.add("active");
+      tabelBulan = Number(opt.dataset.bulan);
+    });
+  });
+
+  tahunEl.querySelectorAll(".dh-period-opt").forEach(opt => {
+    opt.addEventListener("click", () => {
+      tahunEl.querySelectorAll(".dh-period-opt").forEach(o => o.classList.remove("active"));
+      opt.classList.add("active");
+      tabelTahun = Number(opt.dataset.tahun);
+    });
+  });
+}
+
+async function renderTabelLaporan() {
+  const scroll   = document.getElementById("dhTabelScroll");
+  if (!scroll) return;
+
+  scroll.innerHTML = `<div class="dh-ringkasan-empty">Memuat...</div>`;
+
+  const adminUid = window.auth?.currentUser?.uid;
+  const today    = getTanggalLocal();
+  const totalHari = new Date(tabelTahun, tabelBulan + 1, 0).getDate();
+
+  // ambil varian
+  const admin  = (window.usersCache || []).find(u => u.role === "adminCabang");
+  const varian = (admin?.varian || [])
+    .filter(v => { const k = Object.keys(v)[0]; return k && v[k]?.isAktif; })
+    .map(v => Object.keys(v)[0]);
+  const V = varian.length ? varian : ["CB","BB","BK","MC"];
+
+  // ambil semua kurir dari cache
+  const allKurir = (window.usersCache || []).filter(u => ["kurir","sales","hunter"].includes(u.role));
+
+  const COLS = [
+      { key: "order",       label: "Order",       cls: "order",      src: u => u.order },
+      { key: "fee",         label: "Fee",          cls: "fee",        src: u => u.fee },
+      { key: "offFlavor",   label: "Off Flavor",   cls: "offFlavor",  src: u => u.offFlavor },
+      { key: "sisaBarang",  label: "Sisa Barang",  cls: "sisaBarang", src: u => u.sisaBarang },
+      { key: "closing",     label: "Closing",      cls: "closing",    src: u => u?.pembayaran?.closing },
+    ];
+
+  const hariNama = ["Minggu","Senin","Selasa","Rabu","Kamis","Jumat","Sabtu"];
+
+  // build tanggal list
+  let tanggalList = [];
+  for (let tgl = 1; tgl <= totalHari; tgl++) {
+    const tDoc    = `${tabelTahun}-${String(tabelBulan+1).padStart(2,"0")}-${String(tgl).padStart(2,"0")}`;
+    const hari    = hariNama[new Date(tabelTahun, tabelBulan, tgl).getDay()];
+    const label   = `${hari}, ${tgl} ${BULAN_NAMA[tabelBulan]} ${tabelTahun}`;
+    if (tabelFilter === "aktif" && tDoc !== today) continue;
+    tanggalList.push({ tDoc, tgl, hari, label });
+  }
+
+  // fetch semua tanggal dari Firestore
+  const dataMap = {};
+  await Promise.all(tanggalList.map(async ({ tDoc }) => {
+    try {
+      const snap = await window.getDoc(window.doc(window.db, "users", adminUid, "laporanAdmin", tDoc));
+      dataMap[tDoc] = snap.exists() ? snap.data() : null;
+    } catch { dataMap[tDoc] = null; }
+  }));
+
+  // filter tunggakan
+  if (tabelFilter === "tunggakan") {
+    tanggalList = tanggalList.filter(({ tDoc }) => {
+      const data = dataMap[tDoc];
+      if (!data) return false;
+      return Object.values(data).some(v =>
+        typeof v === "object" && v?.pembayaran?.nota?.status?.toLowerCase() === "kurang"
+      );
+    });
+  }
+
+  if (!tanggalList.length) {
+    scroll.innerHTML = `<div class="dh-ringkasan-empty">Belum ada data</div>`;
+    return;
+  }
+
+  // build thead — sticky
+  const th1 = `<tr>
+    <th class="dh-rekap-td-tgl" rowspan="2" style="writing-mode:horizontal-tb;transform:none;min-width:80px">Tanggal</th>
+    <th rowspan="2" class="dh-rekap-td-nama">Nama</th>
+    ${COLS.map(c => `<th colspan="${V.length + 1}" class="dh-rekap-th-grp-${c.cls}">${c.label}</th>`).join("")}
+    <th rowspan="2">Bayar</th>
+    <th rowspan="2">Status</th>
+  </tr>`;
+  const th2 = `<tr>${COLS.map(c => [...V.map(v => `<th>${v}</th>`), `<th style="background:var(--bg-card)!important">JML</th>`].join("")).join("")}</tr>`;
+
+  // build tbody
+  let tbodyHtml = "";
+
+  for (const { tDoc, label } of tanggalList) {
+    const data     = dataMap[tDoc];
+    const kurirData = data
+      ? allKurir.map(k => {
+          const d = data[k.uid];
+          return { uid: k.uid, nama: k.nama, ...(d || {}) };
+        })
+      : allKurir.map(k => ({ uid: k.uid, nama: k.nama }));
+
+    const adaKurang = kurirData.some(u => u?.pembayaran?.nota?.status?.toLowerCase() === "kurang");
+    const rowCls    = adaKurang ? "dh-rekap-block-kurang" : "";
+
+    const sums = {};
+    COLS.forEach(c => { sums[c.key] = {}; V.forEach(v => { sums[c.key][v] = 0; }); });
+    let sumBayar = 0;
+
+    const rowspan = kurirData.length + 1; // +1 untuk total
+
+    const kurirRows = kurirData.map((u, idx) => {
+      const cells = COLS.map(c => {
+        const src = c.src(u) || {};
+        let colSum = 0;
+        const vCells = V.map(v => {
+          const val = Number(src[v] || 0);
+          sums[c.key][v] = (sums[c.key][v] || 0) + val;
+          colSum += val;
+          return `<td class="dh-rekap-col-${c.cls}">${val || ""}</td>`;
+        }).join("");
+        return vCells + `<td class="dh-rekap-col-${c.cls} dh-rekap-td-sum">${colSum || ""}</td>`;
+      }).join("");
+
+      const bayar  = Number(u?.pembayaran?.nota?.bayar || 0);
+      const status = u?.pembayaran?.nota?.status || "-";
+      const ket    = Number(u?.pembayaran?.nota?.keterangan || 0);
+      sumBayar    += bayar;
+
+      let ketHtml = status, ketCls = "";
+      if (status.toLowerCase() === "lunas")  ketCls = "dh-rekap-lunas";
+      if (status.toLowerCase() === "kurang") { ketHtml = `Kurang ${Math.abs(ket).toLocaleString("id-ID")}`; ketCls = "dh-rekap-kurang"; }
+      if (status.toLowerCase() === "lebih")  { ketHtml = `Lebih ${ket.toLocaleString("id-ID")}`;           ketCls = "dh-rekap-lebih"; }
+
+      const tglCell = idx === 0
+        ? `<td class="dh-rekap-td-tgl" rowspan="${rowspan}">${esc(label)}</td>`
+        : "";
+
+      return `<tr class="${rowCls}">
+        ${tglCell}
+        <td class="dh-rekap-td-nama">${esc(u.nama)}</td>
+        ${cells}
+        <td>${bayar ? bayar.toLocaleString("id-ID") : ""}</td>
+        <td class="${ketCls}">${ketHtml}</td>
+      </tr>`;
+    }).join("");
+
+    const sumCells = COLS.map(c => {
+      let total = 0;
+      const vCells = V.map(v => {
+        total += sums[c.key][v] || 0;
+        return `<td class="dh-rekap-td-sum dh-rekap-col-${c.cls}">${sums[c.key][v] || ""}</td>`;
+      }).join("");
+      return vCells + `<td class="dh-rekap-td-sum dh-rekap-col-${c.cls}">${total || ""}</td>`;
+    }).join("");
+
+    const sumRow = `<tr class="${rowCls}">
+      <td class="dh-rekap-td-nama dh-rekap-td-sum">Total</td>
+      ${sumCells}
+      <td class="dh-rekap-td-sum">${sumBayar ? sumBayar.toLocaleString("id-ID") : ""}</td>
+      <td class="dh-rekap-td-sum">—</td>
+    </tr>`;
+
+    tbodyHtml += kurirRows + sumRow;
+  }
+
+  // hitung grand total semua tanggal
+  const grandSums = {};
+  COLS.forEach(c => { grandSums[c.key] = {}; V.forEach(v => { grandSums[c.key][v] = 0; }); });
+  let grandBayar = 0;
+  let grandKet   = 0;
+
+  for (const { tDoc } of tanggalList) {
+    const data = dataMap[tDoc];
+    if (!data) continue;
+    const kurirData = allKurir.map(k => ({ uid: k.uid, nama: k.nama, ...(data[k.uid] || {}) }));
+    kurirData.forEach(u => {
+      COLS.forEach(c => {
+        const src = c.src(u) || {};
+        V.forEach(v => { grandSums[c.key][v] = (grandSums[c.key][v] || 0) + (Number(src[v]) || 0); });
+      });
+      grandBayar += Number(u?.pembayaran?.nota?.bayar || 0);
+      grandKet   += Number(u?.pembayaran?.nota?.keterangan || 0);
+    });
+  }
+
+  const grandCells = COLS.map(c => {
+    let total = 0;
+    const vCells = V.map(v => {
+      total += grandSums[c.key][v] || 0;
+      return `<td class="dh-rekap-td-sum dh-rekap-col-${c.cls}">${grandSums[c.key][v] || ""}</td>`;
+    }).join("");
+    return vCells + `<td class="dh-rekap-td-sum dh-rekap-col-${c.cls}">${total || ""}</td>`;
+  }).join("");
+
+  const grandKetHtml = grandKet === 0 ? "Lunas"
+    : grandKet < 0 ? `Kurang ${Math.abs(grandKet).toLocaleString("id-ID")}`
+    : `Lebih ${grandKet.toLocaleString("id-ID")}`;
+  const grandKetCls = grandKet === 0 ? "dh-rekap-lunas"
+    : grandKet < 0 ? "dh-rekap-kurang" : "dh-rekap-lebih";
+
+  const grandRow = `<tr style="border-top: 2px solid var(--brand-mid)">
+    <td class="dh-rekap-td-tgl" style="writing-mode:horizontal-tb;transform:none;font-size:10px;font-weight:800;color:var(--brand-primary)">TOTAL</td>
+    <td class="dh-rekap-td-nama dh-rekap-td-sum">Grand Total</td>
+    ${grandCells}
+    <td class="dh-rekap-td-sum">${grandBayar ? grandBayar.toLocaleString("id-ID") : ""}</td>
+    <td class="dh-rekap-td-sum ${grandKetCls}">${grandKetHtml}</td>
   </tr>`;
 
-  // gabungkan tanggal rowspan penuh: header(2) + data + sum
-  const fullRowspan = users.length + 3;
-
-  // kalau kosong, tampilkan baris "belum ada data"
-  const emptyRow = !users.length
-    ? `<tr><td colspan="${2 + COLS.length * vLen + 2}" class="lh-empty-cell">Belum ada data</td></tr>`
-    : "";
-  const tglFullCell = `<td rowspan="${fullRowspan}" class="lh-td-tgl">
-      <div class="lh-tgl-inner">
-        <button class="lh-reload-btn" data-tanggal="${tDoc}" title="Reload">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
-        </button>
-        <div class="lh-tgl-text">${tglLabel}</div>
-      </div>
-    </td>`;
-
-  block.innerHTML = `
-    <div class="lh-scroll">
-      <table class="lh-table">
-        <tbody>
-          <tr>${tglFullCell}${th1NoTgl}</tr>
-          <tr>${th2}</tr>
-          ${users.length ? bodyRowsNoTgl + sumRow : emptyRow}
-        </tbody>
-      </table>
-    </div>`;
-
-  // event reload
-  block.querySelector(".lh-reload-btn")?.addEventListener("click", async e => {
-    const btn = e.currentTarget;
-    btn.disabled = true;
-    btn.classList.add("spinning");
-    // fetch dulu sambil animasi muter
-    const d = await loadLaporanAdminTanggal(tDoc, true);
-    cacheLaporanAdmin[tDoc] = d;
-    // beri waktu animasi terlihat minimal 1 putaran
-    await new Promise(r => setTimeout(r, 500));
-    await renderLaporanTable(tDoc, tgl, namaHari);
-  });
-
-  // drag scroll
-  const scroll = block.querySelector(".lh-scroll");
-  if (scroll) {
-    let dn = false, sx = 0, sl = 0;
-    scroll.addEventListener("mousedown", e => { dn=true; sx=e.pageX-scroll.offsetLeft; sl=scroll.scrollLeft; scroll.style.cursor="grabbing"; e.preventDefault(); });
-    document.addEventListener("mouseup", () => { dn=false; scroll.style.cursor=""; });
-    document.addEventListener("mousemove", e => { if(!dn) return; scroll.scrollLeft = sl-(e.pageX-scroll.offsetLeft-sx); });
-    let tx=0, tl=0;
-    scroll.addEventListener("touchstart", e => { tx=e.touches[0].pageX; tl=scroll.scrollLeft; }, {passive:true});
-    scroll.addEventListener("touchmove",  e => { scroll.scrollLeft = tl-(e.touches[0].pageX-tx); }, {passive:true});
+  scroll.innerHTML = `
+    <table class="dh-rekap-table">
+      <thead>${th1}${th2}</thead>
+      <tbody>${tbodyHtml}${grandRow}</tbody>
+    </table>`;
+}
+window.downloadDataHarian = async function(uidKurir, tanggal) {
+  try {
+    const idCabang = window.currentUser?.idCabang || "";
+    const snap = await window.getDocs(window.query(
+      window.collectionGroup(window.db, "dataHarian"),
+      window.where("idCabang", "==", idCabang),
+      window.where("pemilik",  "==", uidKurir),
+      window.where("tanggal",  "==", tanggal)
+    ));
+    const rows = [];
+    snap.forEach(d => rows.push({ id: d.id, path: d.ref.path, ...d.data() }));
+    const blob = new Blob([JSON.stringify(rows, null, 2)], { type: "application/json" });
+    const a    = document.createElement("a");
+    a.href     = URL.createObjectURL(blob);
+    a.download = `dataHarian_${uidKurir}_${tanggal}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    console.log("✅ Downloaded", rows.length, "docs");
+  } catch (err) {
+    console.error("❌ download:", err);
   }
-}
-function buildRekapitulasi(tanggalDoc) {
-  const data = cacheLaporanAdmin[tanggalDoc];
-  if (!data) return null;
-  const users = Object.values(data).filter(item => typeof item === "object" && item?.nama);
-  if (!users.length) return null;
+};
+window.initTabelRekap = initTabelRekap;
+/* ── CATATAN KURIR ── */
+function openCatatanKurir(user) {}
 
-  const hasil = {
-    order: {}, fee: {}, offFlavor: {}, sisaBarang: {}, closing: {},
-    pembayaran: { bayar: 0, kurang: 0, lebih: 0 }
-  };
-
-  function sumMap(target, source = {}) {
-    Object.entries(source).forEach(([k, v]) => { target[k] = (target[k] || 0) + Number(v || 0); });
-  }
-
-  users.forEach(item => {
-    sumMap(hasil.order, item.order);
-    sumMap(hasil.fee, item.fee);
-    sumMap(hasil.offFlavor, item.offFlavor);
-    sumMap(hasil.sisaBarang, item.sisaBarang);
-    sumMap(hasil.closing, item?.pembayaran?.closing);
-    hasil.pembayaran.bayar += Number(item?.pembayaran?.nota?.bayar || 0);
-    const ket = Number(item?.pembayaran?.nota?.keterangan || 0);
-    if (ket < 0) hasil.pembayaran.kurang += Math.abs(ket);
-    if (ket > 0) hasil.pembayaran.lebih += ket;
-  });
-  return hasil;
-}
-function openPopupRekapitulasi(tanggalDoc) {
-  const data = buildRekapitulasi(tanggalDoc);
-  if (!data) { alert("Belum ada data"); return; }
-
-  function renderMapChip(obj = {}) {
-    const entries = Object.entries(obj);
-    if (!entries.length) return `<span class="laporan-empty">-</span>`;
-    return entries.map(([k, v]) =>
-      `<span class="laporan-chip">${escapeHtml(k)}: ${Number(v).toLocaleString("id-ID")}</span>`
-    ).join("");
-  }
-
-  const row = (label, chips) => `
-    <div class="laporan-user-row">
-      <span class="laporan-label">${label}</span>
-      <div class="laporan-chip-wrap">${chips}</div>
-    </div>`;
-
-  openPopup("Rekapitulasi", `
-    <div class="laporan-user-card">
-      <div class="laporan-user-name" style="text-align:center;">REKAPITULASI</div>
-      ${row("Order", renderMapChip(data.order))}
-      ${row("Fee", renderMapChip(data.fee))}
-      ${row("Off Flavor", renderMapChip(data.offFlavor))}
-      ${row("Sisa Barang", renderMapChip(data.sisaBarang))}
-      ${row("Closing", renderMapChip(data.closing))}
-      <div class="laporan-payment">
-        <div class="laporan-user-line"><span>Pembayaran</span><strong>${data.pembayaran.bayar.toLocaleString("id-ID")}</strong></div>
-        <div class="laporan-status">
-          Kurang: ${data.pembayaran.kurang.toLocaleString("id-ID")} | Lebih: ${data.pembayaran.lebih.toLocaleString("id-ID")}
-        </div>
-      </div>
-    </div>`);
-}
-function buildPeriodDropdown() {
-  const monthMenu = document.getElementById("monthMenu");
-  const yearMenu = document.getElementById("yearMenu");
-  if (!monthMenu || !yearMenu) return;
-
-  monthMenu.innerHTML = bulanNama.map((b, i) =>
-    `<div class="custom-option" data-month="${i}">${b}</div>`
-  ).join("");
-
-  const currentYear = new Date().getFullYear();
-  yearMenu.innerHTML = Array.from({ length: currentYear + 3 - 2023 }, (_, i) => currentYear + 2 - i)
-    .map(y => `<div class="custom-option" data-year="${y}">${y}</div>`).join("");
-
-  document.getElementById("selectedMonthText").innerText = bulanNama[selectedMonth];
-  document.getElementById("selectedYearText").innerText = selectedYear;
-}
-function openPeriodPopup() {
-  buildPeriodDropdown();
-  document.getElementById("periodPopupOverlay").classList.add("show");
-}
-function closePeriodPopup() {
-  document.getElementById("periodPopupOverlay").classList.remove("show");
+/* ── HELPERS ── */
+function getTanggalLocal() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}`;
 }
 
-document.addEventListener("click", async e => {
-  // Ranking
-  const rankingBtn = e.target.closest("#btnShowRanking");
-  if (rankingBtn) { await renderRankingOmset(); return; }
-
-  const hideRanking = e.target.closest("#btnHideRanking");
-  if (hideRanking) {
-    document.getElementById("rankingContent").innerHTML = `
-      <div class="ranking-placeholder">Tampilkan ranking omset hari ini</div>
-      <button id="btnShowRanking" class="ranking-btn">Tampilkan</button>`;
-    hideRanking.classList.add("hidden");
-    return;
-  }
-
-  // Popup close
-  if (e.target.closest("#popupDataHarianClose")) { closePopupDataHarianWithCleanup(); return; }
-  if (e.target.id === "popupClose" || e.target.id === "popupOverlay") { closePopupWithCleanup(); return; }
-  if (e.target.id === "periodPopupOverlay") { closePeriodPopup(); return; }
-  if (e.target.id === "dataPeriodBtn") { openPeriodPopup(); return; }
-  if (e.target.id === "applyPeriodBtn") { updatePeriodTitle(); renderLaporanHarian(); closePeriodPopup(); return; }
-
-  // Catatan kurir
-  const saveCatatanBtn = e.target.closest(".popup-catatan-save");
-  if (saveCatatanBtn) { await saveCatatanKurir(saveCatatanBtn); return; }
-
-  // Save popup form
-  const saveBtn = e.target.closest(".popup-save-btn");
-  if (saveBtn) { await savePopupData(saveBtn); return; }
-
-  // Reload data harian
-  const reloadDhBtn = e.target.closest(".popup-dataharian-reload");
-  if (reloadDhBtn) {
-    reloadDhBtn.disabled = true;
-    reloadDhBtn.innerText = "⏳ Memuat...";
-    console.log("🔄 Reload tanggal:", reloadDhBtn.dataset.tanggal);
-    console.log("🔄 Reload uid:", reloadDhBtn.dataset.uid);
-    await renderPopupDataHarian(
-      reloadDhBtn.dataset.uid,
-      reloadDhBtn.dataset.nama,
-      reloadDhBtn.dataset.role,
-      true,
-      reloadDhBtn.dataset.tanggal
-    );
-    return;
-  }
-
-  // Reload laporan admin
-  const reloadLaporanBtn = e.target.closest(".laporan-reload-btn");
-  if (reloadLaporanBtn) {
-    reloadLaporanBtn.disabled = true;
-    reloadLaporanBtn.innerText = "Loading...";
-    await loadLaporanAdminTanggal(reloadLaporanBtn.dataset.tanggal, true);
-    renderLaporanCard(reloadLaporanBtn.dataset.tanggal);
-    reloadLaporanBtn.disabled = false;
-    reloadLaporanBtn.innerText = "Reload";
-    return;
-  }
-
-  // Rekapitulasi
-  const rekapBtn = e.target.closest(".laporan-rekap-btn");
-  if (rekapBtn) {
-    await loadLaporanAdminTanggal(rekapBtn.dataset.tanggal, false);
-    openPopupRekapitulasi(rekapBtn.dataset.tanggal);
-    return;
-  }
-
-  // Filter
-  const filterBtn = e.target.closest(".data-filter-btn");
-  if (filterBtn) {
-    laporanFilter = filterBtn.dataset.filter;
-    localStorage.setItem(STORAGE_FILTER_KEY, laporanFilter);
-    document.querySelectorAll(".data-filter-btn").forEach(btn => btn.classList.remove("active"));
-    filterBtn.classList.add("active");
-    renderLaporanHarian();
-    return;
-  }
-
-  // Toggle accordion laporan
-  const laporanBtn = e.target.closest(".laporan-trigger");
-  if (laporanBtn) {
-    laporanBtn.closest(".laporan-item").classList.toggle("open");
-    return;
-  }
-
-  // Period dropdown bulan
-  const monthBtn = e.target.closest("[data-month]");
-  if (monthBtn) {
-    selectedMonth = Number(monthBtn.dataset.month);
-    document.getElementById("selectedMonthText").innerText = bulanNama[selectedMonth];
-    document.getElementById("monthMenu").classList.remove("show");
-    return;
-  }
-
-  // Period dropdown tahun
-  const yearBtn = e.target.closest("[data-year]");
-  if (yearBtn) {
-    selectedYear = Number(yearBtn.dataset.year);
-    document.getElementById("selectedYearText").innerText = selectedYear;
-    document.getElementById("yearMenu").classList.remove("show");
-    return;
-  }
-
-  if (e.target.closest("#monthSelect .custom-select-trigger")) {
-    document.getElementById("monthMenu").classList.toggle("show");
-    return;
-  }
-  if (e.target.closest("#yearSelect .custom-select-trigger")) {
-    document.getElementById("yearMenu").classList.toggle("show");
-    return;
-  }
-
-  // Buka popup data harian (klik kurir card)
-  const kurirCard = e.target.closest(".kurir-open-popup");
-  if (kurirCard && !e.target.closest(".popup-btn")) {
-    if (window.getSelection()?.toString()) return;
-    openPopupDataHarian("Data Harian", "");
-    await renderPopupDataHarian(
-      kurirCard.dataset.uid,
-      kurirCard.dataset.nama,
-      kurirCard.dataset.role,
-      false
-    );
-    return;
-  }
-
-  // Buka popup form (order/fee/dll)
-  const btn = e.target.closest(".popup-btn");
-  if (btn) {
-    const { nama, uid, type } = btn.dataset;
-    const titles = {
-      order: "Order",
-      fee: "Fee",
-      offflavor: "Off Flavor",
-      sisabarang: "Sisa Barang",
-      pembayaran: "Pembayaran"
-    };
-    const content = await buildPopupForm(type, nama, uid);
-    openPopup(titles[type] || type, content);
-    const form = document.querySelector(".popup-form");
-    if (form) {
-      await loadPopupPreview(form);
-      await calculatePembayaran(form);
-      setupEnterNavigation(form);
-    }
-  }
-});
-document.addEventListener("change", async e => {
-  const dhDate = e.target.closest(".dh-date-input");
-  if (dhDate) {
-    const contentEl = document.getElementById("popupDataHarianContent");
-    if (contentEl) contentEl.style.opacity = ".6";
-    await renderPopupDataHarian(
-      dhDate.dataset.uid,
-      dhDate.dataset.nama,
-      dhDate.dataset.role,
-      false,
-      dhDate.value
-    );
-    if (contentEl) contentEl.style.opacity = "1";
-    return;
-  }
-
-  if (e.target.classList.contains("popup-date")) {
-    const form = e.target.closest(".popup-form");
-    if (form) {
-      await loadPopupPreview(form);
-      await calculatePembayaran(form);
-    }
-  }
-});
-document.addEventListener("input", async e => {
-  if (!e.target.classList.contains("input-bayar")) return;
-  const formatted = formatRibuan(e.target.value);
-  if (e.target.value !== formatted) e.target.value = formatted;
-  const form = e.target.closest(".popup-form");
-  if (form) await calculatePembayaran(form);
-});
+function esc(str) {
+  return String(str)
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
